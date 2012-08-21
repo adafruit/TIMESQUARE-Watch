@@ -3,6 +3,8 @@
 // timer interrupt and bit angle modulation (vs PWM).
 // (C) Adafruit Industries.
 
+// To do: add basic button debounce / interpretation to lib
+
 #if ARDUINO >= 100
  #include "Arduino.h"
 #else
@@ -42,7 +44,7 @@ static const uint8_t
 // anodes and the other cathodes.  So this weird combination of bits sets
 // all rows and columns to their respective 'off' states:
 #define PORTB_OFF B11001010
-#define PORTC_OFF B00000011
+#define PORTC_OFF B00110011 // PC4, PC5 are set to enable I2C pinups
 #define PORTD_OFF B11001100 // PD2, PD3 are set to enable button pullups
 
 // Because the LED matrix ties up so many of the microcontroller's pins,
@@ -87,12 +89,17 @@ void Watch::begin() {
   DDRC  = B00001111;
   DDRD  = B11110000;
 
+  // Set up interrupt-on-change for buttons
+  EICRA = _BV(ISC10) | _BV(ISC00); // Trigger on any logic change
+  EIMSK = _BV(INT1)  | _BV(INT0);  // Enable interrupts on pins
+
   // Set up Timer1 for interrupt:
   TCCR1A  = _BV(WGM11); // Mode 14 (fast PWM), OC1A off
   TCCR1B  = _BV(WGM13) | _BV(WGM12) | _BV(CS10); // Mode 14, no prescale
   ICR1    = 100;
   TIMSK1 |= _BV(TOIE1); // Enable Timer1 interrupt
-  sei();                // Enable global interrupts
+
+  sei(); // Enable global interrupts
 }
 
 // For double-buffered animation, call this function to display new data.
@@ -109,7 +116,9 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
     uint8_t bmask = rowBitPortB[x],
             cmask = rowBitPortC[x],
             dmask = rowBitPortD[x],
-            *p    = (uint8_t *)&backBuf[(7 - y) * 24];
+            *p    = (uint8_t *)&backBuf[(7 - y) * 3];
+// If doing plane, row:
+//            *p    = (uint8_t *)&backBuf[(7 - y) * 24];
     for(uint8_t bit = 1; bit; bit <<= 1) {
       if(c & bit) {
         *p++ |=  bmask;
@@ -120,13 +129,14 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
         *p++ &= ~cmask;
         *p++ &= ~dmask;
       }
+      p += 21; // Remove if doing plane, row
     }
   }
 }
 
 // These are approximate instruction cycle counts for entering and exiting
-// the interrupt, and minimum time spent in body of interrupt.  Derived from
-// disassembled output and might not be 100% accurate.
+// the timer interrupt, and minimum time spent in body of interrupt.
+// Derived from disassembled code, might not be 100% accurate, good enough.
 #define CALLOVERHEAD 28
 #define LOOPTIME     37
 
@@ -137,10 +147,10 @@ ISR(TIMER1_OVF_vect, ISR_BLOCK) {
   // registers are reloaded.
   *colPort[col] |= colBit[col];
 
-  if(++plane >= 8) { // Advance plane counter
-    plane = 0;       // Back to plane 0
-    if(++col >= 8) { // Advance column counter
-      col = 0;       // Back to column 0
+  if(++col >= 8) {     // Advance column counter
+    col = 0;           // Back to column 0
+    if(++plane >= 8) { // Advance plane counter
+      plane = 0;       // Back to plane 0
       if(swapFlag) {            // If requested,
         volatile uint8_t *temp; // swap buffers
         temp     = frontBuf;    // on return to
@@ -176,3 +186,27 @@ ISR(TIMER1_OVF_vect, ISR_BLOCK) {
   TIFR1 |= TOV1; // Clear Timer1 interrupt flag
 }
 
+static uint8_t foo = 0;
+
+uint8_t Watch::buttons(void) {
+	return foo;
+}
+
+ISR(INT0_vect) {
+	switch(PIND & B00001100) {
+	   case B00000000:
+		foo = 3;
+		break;
+	   case B00000100:
+		foo = 2;
+		break;
+	   case B00001000:
+		foo = 1;
+		break;
+	   case B00001100:
+		foo = 0;
+		break;
+	}
+}
+
+ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
