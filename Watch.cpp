@@ -3,8 +3,6 @@
 // timer interrupt and bit angle modulation (vs PWM).
 // (C) Adafruit Industries.
 
-// To do: add basic button debounce / interpretation to lib
-
 #if ARDUINO >= 100
  #include "Arduino.h"
 #else
@@ -19,12 +17,12 @@
 // datasheet...but with the matrix installed sideways in the watch for
 // better component placement, these aren't the same as 'row' and 'column'
 // as we usually consider them in computer graphics.  What's more, the
-// matrix is refreshed bottom to top (columns 7 through 0 in datasheet
-// terminology) because this makes multiplexing artifacts least
-// objectionable when scrolling text right to left (the most common case).
-// The graphics drawing functions use conventional X/Y coordinates from
-// the top left of the watch display, and the low-level driver code takes
-// care of mapping this to the bizarre rotated layout of the LED matrix.
+// matrix is refreshed in a bizarre interleaved order of horizontal lines
+// (to reduce apparent flicker and to make multiplexing artifacts less
+// objectionable when scrolling text horizontally).  The graphics drawing
+// functions use conventional X/Y coordinates from the top left of the
+// watch display, and the low-level driver code takes care of mapping this
+// to the bizarre rotated and interleaved layout of the LED matrix.
 
 // Each LED row or column corresponds to a single bit on a specific PORT.
 // These tables help facilitate drawing and matrix refresh.  They are
@@ -33,13 +31,14 @@
 // apparent.  There's ample RAM for this as the screen buffer isn't very
 // large (128 bytes for 8x8, 8 bits w/double buffering).  Oink oink!
 static volatile unsigned char
-  *colPort[]    = {&PORTD,&PORTB,&PORTB,&PORTC,&PORTB,&PORTC,&PORTB,&PORTD};
+  *colPort[]    = {&PORTD,&PORTB,&PORTB,&PORTB,&PORTB,&PORTC,&PORTC,&PORTD};
 static const uint8_t
-  colOff[]      = {  0x80,  0x08,  0x80,  0x01,  0x02,  0x02,  0x40,  0x40},
-  colOn[]       = {  0x7f,  0xf7,  0x7f,  0xfe,  0xfd,  0xfd,  0xbf,  0xbf},
-  rowBitPortB[] = {    0 ,  0x20,    0 ,  0x10,  0x04,    0 ,  0x01,    0 },
-  rowBitPortC[] = {    0 ,    0 ,  0x08,    0 ,    0 ,  0x04,    0 ,    0 },
-  rowBitPortD[] = {  0x10,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,  0x20};
+  colOff[]      = {  0x80,  0x02,  0x80,  0x40,  0x08,  0x02,  0x01,  0x40},
+  colOn[]       = {  0x7f,  0xfd,  0x7f,  0xbf,  0xf7,  0xfd,  0xfe,  0xbf},
+  colStart[]    = {    21,     9,    15,     3,    18,     6,    12,     0},
+  rowBitPortB[] = {     0,  0x20,     0,  0x10,  0x04,     0,  0x01,     0},
+  rowBitPortC[] = {     0,     0,  0x08,     0,     0,  0x04,     0,     0},
+  rowBitPortD[] = {  0x10,     0,     0,     0,     0,     0,     0,  0x20};
 
 // The 'off' state for rows and columns is different because one represents
 // anodes and the other cathodes.  So this weird combination of bits sets
@@ -56,14 +55,17 @@ static const uint8_t
 static uint8_t
   img[2][8 * 8 * 3]; // Display data (double-buffered)
 static volatile uint8_t
-  plane = 7,
-  col   = 7,
-  *backBuf,  // Buffer being modified
-  *frontBuf, // Buffer being displayed
-  *ptr;      // Current pointer into frontBuf
+  plane    = 7,
+  col      = 7,
+  *backBuf,     // Buffer being modified
+  *frontBuf,    // Buffer being displayed
+  *ptr,         // Current pointer into frontBuf
+  bState   = 0; // Current button state
 static volatile boolean
   swapFlag = false;
-static volatile unsigned int frames = 0;
+static volatile unsigned int 
+  frames   = 0; // For delay() counter
+
 
 // Constructor: pass 'true' to enable double-buffering (default = false).
 Watch::Watch(boolean doubleBuffer) {
@@ -102,7 +104,8 @@ void Watch::begin() {
   TIMSK1 |= _BV(OCIE1A);
 
   // Timer0 interrupt is disabled as this throws off the delicate PWM
-  // timing.  Unfortunately this means delay(), millis() won't work.
+  // timing.  Unfortunately this means delay(), millis() won't work,
+  // so we have our own functions for passing time.
   TIMSK0 = 0;
 
   sei(); // Enable global interrupts
@@ -123,7 +126,7 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
             cmask = rowBitPortC[x],
             dmask = rowBitPortD[x],
             c8    = (uint8_t)c,
-            *p    = (uint8_t *)&backBuf[(7 - y) * 3];
+            *p    = (uint8_t *)&backBuf[colStart[y]];
     for(uint8_t bit = 1; bit; bit <<= 1) {
       if(c8 & bit) {
         *p++ |=  bmask;
@@ -154,6 +157,8 @@ void Watch::delay(int f) {
 #define OVERHEAD   53
 #define LEDMINTIME 60
 // 60 * 255 = 15300, * 8 = 122400, 8M / 122400 = ~65 Hz
+// Because columns are cycled within PWM intervals, the appearance is more
+// like 2X this (~130 Hz), though the actual full frame rate is still ~65.
 
 ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
 
@@ -195,32 +200,17 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
 
   // Enable new column and reset Timer0 counter.  The latter is done
   // so that the LED 'on' time is more precise -- the above col/plane
-  // conditional logic doesn't throw the brightness off.
+  // conditional logic won't throw the brightness off.
   *colPort[col] &= colOn[col];
   TCNT1          = 0;
 }
 
-static uint8_t foo = 0;
-
 uint8_t Watch::buttons(void) {
-	return foo;
+	return bState;
 }
 
 ISR(INT0_vect) {
-	switch(PIND & B00001100) {
-	   case B00000000:
-		foo = 3;
-		break;
-	   case B00000100:
-		foo = 2;
-		break;
-	   case B00001000:
-		foo = 1;
-		break;
-	   case B00001100:
-		foo = 0;
-		break;
-	}
+  bState = ((PIND >> 2) & 0x03) ^ 0x03;
 }
 
 ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
