@@ -12,7 +12,8 @@ class Watch : public Adafruit_GFX {
   void
     begin(void),
     drawPixel(int16_t x, int16_t y, uint16_t c),
-    swapBuffers(boolean copy=false);
+    swapBuffers(boolean copy=false),
+    delay(int);
   uint8_t
     buttons(void);
 };

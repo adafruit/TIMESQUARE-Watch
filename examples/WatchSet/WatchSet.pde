@@ -27,7 +27,8 @@ void loop() {
   watch.setCursor(textX, 0);
   watch.print(str);
   watch.swapBuffers();
-  delay(20);
+  watch.delay(2);
+  // delay(20);
   if(--textX < -47) textX = 8;
 }
 
