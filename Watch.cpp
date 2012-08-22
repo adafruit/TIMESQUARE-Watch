@@ -16,18 +16,15 @@
 // here refer to the hardware pin functions as described in the LED matrix
 // datasheet...but with the matrix installed sideways in the watch for
 // better component placement, these aren't the same as 'row' and 'column'
-// as we usually consider them in computer graphics.  What's more, the
-// matrix is refreshed in a bizarre interleaved order of horizontal lines
-// (to reduce apparent flicker and to make multiplexing artifacts less
-// objectionable when scrolling text horizontally).  The graphics drawing
-// functions use conventional X/Y coordinates from the top left of the
-// watch display, and the low-level driver code takes care of mapping this
-// to the bizarre rotated and interleaved layout of the LED matrix.
+// as we usually consider them in computer graphics.  So...the graphics
+// drawing functions use conventional intuitive X/Y coordinates from the
+// top left of the watch display, and the lower-level code takes care of
+// mapping this to the oddly rotated layout of the LED matrix.
 
 // These tables help facilitate pixel drawing.  They are intentionally
 // NOT placed in PROGMEM in order to save a few instruction cycles.
 // There's ample RAM for this as the screen buffer isn't very large
-// (384 bytes for 8x8, 8 bits w/double buffering).  Oink oink!
+// (192 bytes single-buffered, 384 bytes double-buffered).  Oink oink!
 static const uint8_t
   rowBitPortB[] = {    0, 0x20,    0, 0x10, 0x04,    0, 0x01,    0},
   rowBitPortC[] = {    0,    0, 0x08,    0,    0, 0x04,    0,    0},
@@ -103,7 +100,7 @@ void Watch::begin() {
 
   // Timer0 interrupt is disabled as this throws off the delicate PWM
   // timing.  Unfortunately this means delay(), millis() won't work,
-  // so we have our own functions for passing time.
+  // so we have our own function later for passing time.
   TIMSK0 = 0;
 
   sei(); // Enable global interrupts
@@ -186,10 +183,17 @@ void Watch::delay(unsigned int f) {
     asm volatile("cbi %0,%1" :: "I"(_SFR_IO_ADDR(port)), "I"(bit)); \
     break;
 
+// Plan is to eventually make this a 'naked' interrupt w/100% assembly.
+// avr-gcc output looks a little bloaty esp. in the stack work...if this
+// can be tightened up, OVERHEAD constant above can be reduced and a
+// a better refresh rate should be possible.
 ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
 
   uint8_t *p = (uint8_t *)ptr;
 
+  // The matrix is refreshed in a bizarre interleaved order of horizontal
+  // lines in order to reduce apparentl flicker and to make multiplexing
+  // artifacts less objectionable, esp. when scrolling text horizontally.
   switch(col) {
     COLSTART(0, PORTD, 7,  0)
       OCR1A = (LEDMINTIME << plane) - OVERHEAD; // Interrupt time for plane
