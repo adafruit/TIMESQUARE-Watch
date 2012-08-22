@@ -22,8 +22,6 @@ void setup() {
 }
 
 void loop() {
-  uint8_t x, y, i;
-  uint8_t *p;
   uint8_t b = watch.buttons();
 
   if(b == 1) {
@@ -66,7 +64,7 @@ void loop() {
 }
 
 void dump() {
-  int x, y, z, i;
+  int x, y, z;
   uint8_t *p = watch.backBuffer();
   for(y=0;y<8;y++) { // row
     for(z=0;z<8;z++) { // plane

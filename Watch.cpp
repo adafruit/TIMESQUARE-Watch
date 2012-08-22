@@ -46,13 +46,12 @@ static const uint8_t
 // the matrix-specific variables and such are simply declared in the code
 // here rather than in private vars.  Keeps the interrupt code simple.
 static uint8_t
-  img[2][8 * 8 * 3]; // Display data (double-buffered)
+  *img[2];      // Display data
 static volatile uint8_t
   plane    = 7,
   col      = 7,
-  *backBuf,     // Buffer being modified
-  *frontBuf,    // Buffer being displayed
-  *ptr,         // Current pointer into frontBuf
+  *ptr,         // Current pointer into front buffer
+  frontIdx = 0, // Buffer # being displayed (vs modified)
   bState   = 0; // Current button state
 static volatile boolean
   swapFlag = false;
@@ -61,18 +60,24 @@ static volatile unsigned int
 
 
 // Constructor: pass 'true' to enable double-buffering (default = false).
-Watch::Watch(boolean doubleBuffer) {
-  ptr = frontBuf = &img[0][0];
-  for(uint8_t i=0; i<(8*8*3);) {
-    frontBuf[i++] = PORTB_OFF;
-    frontBuf[i++] = PORTC_OFF;
-    frontBuf[i++] = PORTD_OFF;
+Watch::Watch(boolean dbuf) {
+  int bufSize   = 3 * 8 * 8, // 3 bytes/row * 8 rows * 8 planes
+      allocSize = (dbuf == true) ? (bufSize * 2) : bufSize;
+
+  // Allocate and initialize front image buffer:
+  if(NULL == (img[0] = (uint8_t *)malloc(allocSize))) return;
+  ptr = img[0];
+  for(uint8_t i=0; i<bufSize;) {
+    ptr[i++] = PORTB_OFF;
+    ptr[i++] = PORTC_OFF;
+    ptr[i++] = PORTD_OFF;
   }
-  if(doubleBuffer) {
-    backBuf = &img[1][0];
-    memcpy((void *)backBuf, (void *)frontBuf, 8 * 8 * 3);
+  // If double-buffered, copy front image buffer to back
+  if(dbuf) {
+    img[1] = &img[0][bufSize];
+    memcpy(img[1], img[0], bufSize);
   } else {
-    backBuf = frontBuf;
+    img[1] = img[0]; // Else both point to the same address
   }
   constructor(8, 8); // Init Adafruit_GFX
 }
@@ -109,7 +114,7 @@ void Watch::swapBuffers(boolean copy) {
   // Swap actually takes place at specific point in interrupt.
   // Set flag to request swap, then wait for change to complete:
   for(swapFlag = true; swapFlag; );
-  if(copy) memcpy((void *)backBuf, (void *)frontBuf, 8 * 8 * 3);
+  if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * 8);
 }
 
 // Basic pixel-drawing function for Adafruit_GFX.
@@ -119,7 +124,7 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
             cmask = rowBitPortC[x],
             dmask = rowBitPortD[x],
             c8    = (uint8_t)c,
-            *p    = (uint8_t *)&backBuf[y * 3];
+            *p    = (uint8_t *)&img[1 - frontIdx][y * 3];
     for(uint8_t bit = 1; bit; bit <<= 1) {
       if(c8 & bit) {
         p[0] |=  bmask;
@@ -198,15 +203,12 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
     COLSTART(7, PORTB, 1, 21)
       if(++plane >= 8) { // Advance plane counter
         plane = 0;       // Back to plane 0
-        if(swapFlag) {            // If requested,
-          volatile uint8_t *temp; // swap buffers
-          temp     = frontBuf;    // on return to
-          frontBuf = backBuf;     // first column.
-          backBuf  = temp;
-          swapFlag = false;
+        if(swapFlag) {       // If requested, swap
+          frontIdx ^= 1;     // buffers on return
+          swapFlag  = false; // to first column
         }
-        ptr = frontBuf; // Reset image pointer to start
-        frames++;       // For delay() function
+        ptr = img[frontIdx];
+        frames++; // For delay() function
       } else ptr += 24;
     COLEND(PORTD, 7, 0)
   }
@@ -217,7 +219,7 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
 }
 
 uint8_t *Watch::backBuffer() {
-  return (uint8_t *)backBuf;
+  return img[1 - frontIdx];
 }
 
 uint8_t Watch::buttons(void) {
