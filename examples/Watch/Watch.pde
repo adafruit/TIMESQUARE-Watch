@@ -3,10 +3,12 @@
 #include <Adafruit_GFX.h>
 #include <Watch.h>
 
-Watch watch(true); // Use double-buffered animation
-RTC_DS1307 RTC;
+#define MODE_SET  0
+#define MODE_TIME 1
 
-uint8_t mode = 0;
+Watch      watch(true); // Use double-buffered animation
+RTC_DS1307 RTC;
+uint8_t    mode = MODE_TIME;
 
 void setup() {
   Serial.begin(9600);
@@ -17,7 +19,9 @@ void setup() {
 
 void loop() {
   switch(mode) {
-   case 0:
+   case MODE_SET:
+    break;
+   case MODE_TIME:
     break;
   }
   watch.swapBuffers();

@@ -24,21 +24,14 @@
 // watch display, and the low-level driver code takes care of mapping this
 // to the bizarre rotated and interleaved layout of the LED matrix.
 
-// Each LED row or column corresponds to a single bit on a specific PORT.
-// These tables help facilitate drawing and matrix refresh.  They are
-// intentionally NOT placed in PROGMEM in order to save a few cycles in
-// the interrupt function -- the faster that runs, the less flicker is
-// apparent.  There's ample RAM for this as the screen buffer isn't very
-// large (128 bytes for 8x8, 8 bits w/double buffering).  Oink oink!
-static volatile unsigned char
-  *colPort[]    = {&PORTD,&PORTB,&PORTB,&PORTB,&PORTB,&PORTC,&PORTC,&PORTD};
+// These tables help facilitate pixel drawing.  They are intentionally
+// NOT placed in PROGMEM in order to save a few instruction cycles.
+// There's ample RAM for this as the screen buffer isn't very large
+// (384 bytes for 8x8, 8 bits w/double buffering).  Oink oink!
 static const uint8_t
-  colOff[]      = {  0x80,  0x02,  0x80,  0x40,  0x08,  0x02,  0x01,  0x40},
-  colOn[]       = {  0x7f,  0xfd,  0x7f,  0xbf,  0xf7,  0xfd,  0xfe,  0xbf},
-  colStart[]    = {    21,     9,    15,     3,    18,     6,    12,     0},
-  rowBitPortB[] = {     0,  0x20,     0,  0x10,  0x04,     0,  0x01,     0},
-  rowBitPortC[] = {     0,     0,  0x08,     0,     0,  0x04,     0,     0},
-  rowBitPortD[] = {  0x10,     0,     0,     0,     0,     0,     0,  0x20};
+  rowBitPortB[] = {    0, 0x20,    0, 0x10, 0x04,    0, 0x01,    0},
+  rowBitPortC[] = {    0,    0, 0x08,    0,    0, 0x04,    0,    0},
+  rowBitPortD[] = { 0x10,    0,    0,    0,    0,    0,    0, 0x20};
 
 // The 'off' state for rows and columns is different because one represents
 // anodes and the other cathodes.  So this weird combination of bits sets
@@ -126,18 +119,18 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
             cmask = rowBitPortC[x],
             dmask = rowBitPortD[x],
             c8    = (uint8_t)c,
-            *p    = (uint8_t *)&backBuf[colStart[y]];
+            *p    = (uint8_t *)&backBuf[y * 3];
     for(uint8_t bit = 1; bit; bit <<= 1) {
       if(c8 & bit) {
-        *p++ |=  bmask;
-        *p++ |=  cmask;
-        *p++ |=  dmask;
+        p[0] |=  bmask;
+        p[1] |=  cmask;
+        p[2] |=  dmask;
       } else {
-        *p++ &= ~bmask;
-        *p++ &= ~cmask;
-        *p++ &= ~dmask;
+        p[0] &= ~bmask;
+        p[1] &= ~cmask;
+        p[2] &= ~dmask;
       }
-      p += 21;
+      p += 24;
     }
   }
 }
@@ -145,8 +138,8 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
 // Because Timer0 is disabled (throws off LED brightness), our own delay
 // function is provided.  Unlike normal Arduino delay(), the units here
 // are NOT milliseconds, but frames.  As noted below, one frame is about
-// 1/65 second (ish).
-void Watch::delay(int f) {
+// 1/65 second(ish).
+void Watch::delay(unsigned int f) {
   for(frames = 0; frames < f;);
 }
 
@@ -160,53 +153,75 @@ void Watch::delay(int f) {
 // Because columns are cycled within PWM intervals, the appearance is more
 // like 2X this (~130 Hz), though the actual full frame rate is still ~65.
 
+// Turn prior column off, then load new row bits on all 3 PORTs
+#define COLSTART(n, port, bit, idx) \
+   case n:                     \
+    asm volatile(              \
+     "sbi %0,%1\n\t"           \
+     "ld  __tmp_reg__,%a2\n\t" \
+     "out %3,__tmp_reg__\n\t"  \
+     "ld  __tmp_reg__,%a4\n\t" \
+     "out %5,__tmp_reg__\n\t"  \
+     "ld  __tmp_reg__,%a6\n\t" \
+     "out %7,__tmp_reg__\n\t"  \
+     ::                        \
+     "I"(_SFR_IO_ADDR(port)),  \
+     "I"(bit),                 \
+     "e"(&p[idx]),             \
+     "I"(_SFR_IO_ADDR(PORTB)), \
+     "e"(&p[idx+1]),           \
+     "I"(_SFR_IO_ADDR(PORTC)), \
+     "e"(&p[idx+2]),           \
+     "I"(_SFR_IO_ADDR(PORTD)));
+
+// Advance 'col' to next column, then enable current column loaded above.
+// Columns advance in an interleaved order, not in-order top to bottom.
+#define COLEND(port, bit, nxt) \
+    col = nxt; \
+    asm volatile("cbi %0,%1" :: "I"(_SFR_IO_ADDR(port)), "I"(bit)); \
+    break;
+
 ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
 
-  // Turn current column off.  This is done even when advancing planes
-  // on the same column, to avoid momentary flicker when the three PORT
-  // registers are reloaded, and to keep LED 'on' times more consistent.
-  *colPort[col] |= colOff[col];
-
-  if(++col >= 8) {     // Advance column counter
-    col = 0;           // Back to column 0
-    if(++plane >= 8) { // Advance plane counter
-      plane = 0;       // Back to plane 0
-      if(swapFlag) {            // If requested,
-        volatile uint8_t *temp; // swap buffers
-        temp     = frontBuf;    // on return to
-        frontBuf = backBuf;     // first column.
-        backBuf  = temp;
-        swapFlag = false;
-      }
-      ptr = frontBuf; // Reset image pointer to start
-      frames++;       // For delay() function
-    }
-    OCR1A = (LEDMINTIME << plane) - OVERHEAD; // Interrupt time for plane
-  }
-
-  // Set new row bits (columns are off at this point).  The compiler
-  // seems to miss out on an opportunity to use Z+ addressing mode,
-  // so a tiny bit of assembly is used to save a few instructions.
-  // Temporary variable 'p' is needed because volatile 'ptr' doesn't
-  // take well to optimization.  Weird stuff.
   uint8_t *p = (uint8_t *)ptr;
-  asm volatile("ld  __tmp_reg__,%a0+" :: "e"(p));
-  asm volatile("out %0,__tmp_reg__" :: "I"(_SFR_IO_ADDR(PORTB)));
-  asm volatile("ld  __tmp_reg__,%a0+" :: "e"(p));
-  asm volatile("out %0,__tmp_reg__" :: "I"(_SFR_IO_ADDR(PORTC)));
-  asm volatile("ld  __tmp_reg__,%a0+" :: "e"(p));
-  asm volatile("out %0,__tmp_reg__" :: "I"(_SFR_IO_ADDR(PORTD)));
-  ptr = p;
 
-  // Enable new column and reset Timer0 counter.  The latter is done
-  // so that the LED 'on' time is more precise -- the above col/plane
-  // conditional logic won't throw the brightness off.
-  *colPort[col] &= colOn[col];
-  TCNT1          = 0;
+  switch(col) {
+    COLSTART(0, PORTD, 7,  0)
+      OCR1A = (LEDMINTIME << plane) - OVERHEAD; // Interrupt time for plane
+    COLEND(PORTD, 6, 4)
+    COLSTART(1, PORTB, 3,  3) COLEND(PORTB, 6, 5)
+    COLSTART(2, PORTC, 0,  6) COLEND(PORTC, 1, 6)
+    COLSTART(3, PORTB, 7,  9) COLEND(PORTB, 1, 7)
+    COLSTART(4, PORTD, 6, 12) COLEND(PORTC, 0, 2)
+    COLSTART(5, PORTB, 6, 15) COLEND(PORTB, 7, 3)
+    COLSTART(6, PORTC, 1, 18) COLEND(PORTB, 3, 1)
+    COLSTART(7, PORTB, 1, 21)
+      if(++plane >= 8) { // Advance plane counter
+        plane = 0;       // Back to plane 0
+        if(swapFlag) {            // If requested,
+          volatile uint8_t *temp; // swap buffers
+          temp     = frontBuf;    // on return to
+          frontBuf = backBuf;     // first column.
+          backBuf  = temp;
+          swapFlag = false;
+        }
+        ptr = frontBuf; // Reset image pointer to start
+        frames++;       // For delay() function
+      } else ptr += 24;
+    COLEND(PORTD, 7, 0)
+  }
+  // Reset Timer0 counter.  This is done so that the LED 'on' time is
+  // more precise -- the above plane-advancing conditional logic won't
+  // throw the brightness off.
+  TCNT1 = 0;
+}
+
+uint8_t *Watch::backBuffer() {
+  return (uint8_t *)backBuf;
 }
 
 uint8_t Watch::buttons(void) {
-	return bState;
+  return bState;
 }
 
 ISR(INT0_vect) {
@@ -214,3 +229,4 @@ ISR(INT0_vect) {
 }
 
 ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
+
