@@ -104,7 +104,6 @@ void Watch::begin() {
   TCCR2A = 0;
   TCCR2B = _BV(CS22) | _BV(CS21) | _BV(CS20);
   // Timer2 interrupt is not enabled until a button is pressed.
-  // TIMSK2 |= _BV(TOIE2);
 
   // Set up interrupt-on-change for buttons.
   EICRA = _BV(ISC10)  | _BV(ISC00);  // Trigger on any logic change
