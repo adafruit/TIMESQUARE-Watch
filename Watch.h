@@ -3,6 +3,13 @@
 
 #include "Adafruit_GFX.h"
 
+#define ACTION_NONE       0
+#define ACTION_TAP_LEFT   1
+#define ACTION_TAP_RIGHT  2
+#define ACTION_HOLD_LEFT  3
+#define ACTION_HOLD_RIGHT 4
+#define ACTION_HOLD_BOTH  5
+
 class Watch : public Adafruit_GFX {
 
  public:
@@ -15,7 +22,7 @@ class Watch : public Adafruit_GFX {
     swapBuffers(boolean copy=false),
     delay(unsigned int);
   uint8_t
-    buttons(void),
+    action(void),
     *backBuffer(void);
 };
 

@@ -43,18 +43,19 @@ static const uint8_t
 // the matrix-specific variables and such are simply declared in the code
 // here rather than in private vars.  Keeps the interrupt code simple.
 static uint8_t
-  *img[2];      // Display data
+  *img[2];                // Display data
 static volatile uint8_t
   plane    = 7,
   col      = 7,
-  *ptr,         // Current pointer into front buffer
-  frontIdx = 0, // Buffer # being displayed (vs modified)
-  bState   = 0; // Current button state
+  *ptr,                   // Current pointer into front buffer
+  frontIdx = 0,           // Buffer # being displayed (vs modified)
+  bSave,                  // Last button state
+  bCount   = 0,           // Timer2 overflow counter
+  bAction  = ACTION_NONE; // Last button action
 static volatile boolean
   swapFlag = false;
 static volatile unsigned int 
   frames   = 0; // For delay() counter
-
 
 // Constructor: pass 'true' to enable double-buffering (default = false).
 Watch::Watch(boolean dbuf) {
@@ -79,7 +80,7 @@ Watch::Watch(boolean dbuf) {
   constructor(8, 8); // Init Adafruit_GFX
 }
 
-// Initialize PORT registers and enable button and timer interrupts.
+// Initialize PORT registers and enable timer and button interrupts.
 void Watch::begin() {
   PORTB = PORTB_OFF; // Turn all rows/columns off
   PORTC = PORTC_OFF;
@@ -88,11 +89,7 @@ void Watch::begin() {
   DDRC  = B00001111;
   DDRD  = B11110000;
 
-  // Set up interrupt-on-change for buttons.
-  EICRA = _BV(ISC10) | _BV(ISC00); // Trigger on any logic change
-  EIMSK = _BV(INT1)  | _BV(INT0);  // Enable interrupts on pins
-
-  // Set up Timer1 for interrupt.  Mode 4 (CTC), OC1A off, no prescale.
+  // Set up Timer1 for matrix interrupt.  Mode 4 (CTC), OC1A off, no prescale.
   TCCR1A  = 0;
   TCCR1B  = _BV(WGM12) | _BV(CS10);
   OCR1A   = 100;
@@ -102,6 +99,17 @@ void Watch::begin() {
   // timing.  Unfortunately this means delay(), millis() won't work,
   // so we have our own function later for passing time.
   TIMSK0 = 0;
+
+  // Set up Timer2 for button-hold counter.  Mode 0, OC2A off, 1024x prescale.
+  TCCR2A = 0;
+  TCCR2B = _BV(CS22) | _BV(CS21) | _BV(CS20);
+  // Timer2 interrupt is not enabled until a button is pressed.
+  // TIMSK2 |= _BV(TOIE2);
+
+  // Set up interrupt-on-change for buttons.
+  EICRA = _BV(ISC10)  | _BV(ISC00);  // Trigger on any logic change
+  EIMSK = _BV(INT1)   | _BV(INT0);   // Enable interrupts on pins
+  bSave = _BV(PORTD3) | _BV(PORTD2); // Get initial button state
 
   sei(); // Enable global interrupts
 }
@@ -177,23 +185,23 @@ void Watch::delay(unsigned int f) {
      "I"(_SFR_IO_ADDR(PORTD)));
 
 // Advance 'col' to next column, then enable current column loaded above.
-// Columns advance in an interleaved order, not in-order top to bottom.
+// Columns advance in a bizarre interleaved order of horizontal lines in
+// order to reduce apparent flicker and to make multiplexing artifacts
+// less objectionable, esp. when scrolling text horizontally.
 #define COLEND(port, bit, nxt) \
     col = nxt; \
     asm volatile("cbi %0,%1" :: "I"(_SFR_IO_ADDR(port)), "I"(bit)); \
     break;
 
-// Plan is to eventually make this a 'naked' interrupt w/100% assembly.
+// Plan is to eventually make this a 'naked' interrupt w/100% assembly,
 // avr-gcc output looks a little bloaty esp. in the stack work...if this
-// can be tightened up, OVERHEAD constant above can be reduced and a
-// a better refresh rate should be possible.
+// can be tightened up, OVERHEAD and LEDMINTIME constants above can be
+// reduced and a a better refresh rate should be possible.  Already
+// unrolled this (e.g. no array lookups), just needs a bit more TLC.
 ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
 
   uint8_t *p = (uint8_t *)ptr;
 
-  // The matrix is refreshed in a bizarre interleaved order of horizontal
-  // lines in order to reduce apparentl flicker and to make multiplexing
-  // artifacts less objectionable, esp. when scrolling text horizontally.
   switch(col) {
     COLSTART(0, PORTD, 7,  0)
       OCR1A = (LEDMINTIME << plane) - OVERHEAD; // Interrupt time for plane
@@ -226,13 +234,40 @@ uint8_t *Watch::backBuffer() {
   return img[1 - frontIdx];
 }
 
-uint8_t Watch::buttons(void) {
-  return bState;
+uint8_t Watch::action(void) {
+  uint8_t a = bAction;
+  bAction   = ACTION_NONE;
+  return  a;
 }
 
 ISR(INT0_vect) {
-  bState = ((PIND >> 2) & 0x03) ^ 0x03;
+
+  uint8_t b = PIND & (_BV(PORTD3) | _BV(PORTD2));
+
+  if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
+    TIMSK2 &= ~_BV(TOIE2);               // Disable Timer2 interrupt
+    if((bCount > 2)) {                   // Past debounce threshold?
+      if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;
+      else if(bSave == _BV(PORTD2)) bAction = ACTION_TAP_RIGHT;
+    }
+  } else {                 // Button pressed
+    if(b == bSave) return; // Debounce
+    bCount  = TCNT2 = 0;   // Clear counter + timer
+    TIMSK2 |= _BV(TOIE2);  // Enable Timer2 interrupt
+  }
+  bSave = b; // Note last button change
 }
 
 ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
+
+// Overflow = 256 * 1024 inst.  8MHz / (256 * 1024) = ~30.5 Hz, ~33 msec.
+ISR(TIMER2_OVF_vect) {
+  if(bCount >= 76) {              // ~2.5 second hold
+    TIMSK2 &= ~_BV(TOIE2);        // Stop interrupt
+    if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
+    else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
+    else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
+    bSave = bCount = 0;           // So button release code isn't confused
+  } else bCount++;                // else keep counting...
+}
 
