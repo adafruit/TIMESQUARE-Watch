@@ -20,7 +20,7 @@ class Watch : public Adafruit_GFX {
     begin(void),
     drawPixel(int16_t x, int16_t y, uint16_t c),
     swapBuffers(boolean copy=false),
-    delay(unsigned int);
+    delay(uint8_t);
   uint8_t
     action(void),
     *backBuffer(void);

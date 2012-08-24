@@ -51,11 +51,10 @@ static volatile uint8_t
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
   bCount   = 0,           // Timer2 overflow counter
-  bAction  = ACTION_NONE; // Last button action
+  bAction  = ACTION_NONE, // Last button action
+  frames   = 0; // For delay() counter
 static volatile boolean
   swapFlag = false;
-static volatile unsigned int 
-  frames   = 0; // For delay() counter
 
 // Constructor: pass 'true' to enable double-buffering (default = false).
 Watch::Watch(boolean dbuf) {
@@ -147,10 +146,22 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
 // Because Timer0 is disabled (throws off LED brightness), our own delay
 // function is provided.  Unlike normal Arduino delay(), the units here
 // are NOT milliseconds, but frames.  As noted below, one frame is about
-// 1/65 second(ish).
-void Watch::delay(unsigned int f) {
+// 1/65 second(ish).  Second parameter is a bitmask of actions that will
+// abort the current delay operation (or 0 if no abort option).
+void Watch::delay(uint8_t f) {
   for(frames = 0; frames < f;);
 }
+
+uint8_t *Watch::backBuffer(void) {
+  return img[1 - frontIdx];
+}
+
+uint8_t Watch::action(void) {
+  uint8_t a = bAction;
+  bAction   = ACTION_NONE;
+  return  a;
+}
+
 
 // OVERHEAD is the estimated instruction cycle count for the stack work
 // done entering and exiting the timer interrupt.  LEDMINTIME is the
@@ -225,18 +236,9 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
   }
   // Reset Timer0 counter.  This is done so that the LED 'on' time is
   // more precise -- the above plane-advancing conditional logic won't
-  // throw the brightness off.
+  // throw the brightness off.  Need consistent time from end of
+  // interrupt to start of next, not uniform start to start interval.
   TCNT1 = 0;
-}
-
-uint8_t *Watch::backBuffer() {
-  return img[1 - frontIdx];
-}
-
-uint8_t Watch::action(void) {
-  uint8_t a = bAction;
-  bAction   = ACTION_NONE;
-  return  a;
 }
 
 ISR(INT0_vect) {
