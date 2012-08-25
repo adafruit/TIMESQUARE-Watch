@@ -1,7 +1,7 @@
 /*
 INTERACTING WITH WATCH:
 A button 'tap' is a quick press (a second or less).
-A button 'hold' is a long press (2.5 seconds or longer).
+A button 'hold' is a long press (2 seconds or longer).
 Watch will start up in time display mode.
 
 TIME DISPLAY MODE:
@@ -34,11 +34,21 @@ void (*modeFunc[])(uint8_t) = {
 Watch      watch(true); // Use double-buffered animation
 RTC_DS1307 RTC;
 uint8_t    mode = MODE_MARQUEE, mode_last = MODE_MARQUEE;
+boolean    h24  = false;
 
 void setup() {
-  Serial.begin(9600);
+  DateTime now;
+
+//  Serial.begin(9600);
   Wire.begin();
   RTC.begin();
+  now = RTC.now();
+  // If clock is unset, set it to compile time and jump to time-setting mode
+  if((now.year() == 2000) && (now.month()  == 1) && (now.day()    == 1) &&
+     (now.hour() == 0   ) && (now.minute() == 0) && (now.second() <  5)) {
+    RTC.adjust(DateTime(__DATE__, __TIME__));
+    mode = MODE_SET;
+  }
   watch.begin();
 }
 
@@ -55,11 +65,15 @@ void loop() {
       mode      = MODE_SET;
     }
   } else if(a == ACTION_HOLD_RIGHT) {
-    // Switch to next display mode (w/wrap)
-    if(++mode >= N_MODES) mode = 1;
+    if(mode != MODE_SET) {
+      // Switch to next display mode (w/wrap)
+      if(++mode >= N_MODES) mode = 1;
+    }
   } else if(a == ACTION_HOLD_LEFT) {
-    // Switch to prior display mode (w/wrap)
-    if(--mode < 1) mode = N_MODES - 1;
+    if(mode != MODE_SET) {
+      // Switch to prior display mode (w/wrap)
+      if(--mode < 1) mode = N_MODES - 1;
+    }
   }
 
   (*modeFunc[mode])(a); // Action is passed to clock-drawing function

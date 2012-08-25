@@ -30,6 +30,7 @@ void mode_marquee(uint8_t action) {
 
   now = RTC.now();
   i  = now.hour();
+  if((!h24) && (i > 12)) i -= 12;
   h1 = i / 10;
   h2 = i - (h1 * 10);
   i  = now.minute();

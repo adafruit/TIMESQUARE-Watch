@@ -263,7 +263,7 @@ ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
 
 // Overflow = 256 * 1024 inst.  8MHz / (256 * 1024) = ~30.5 Hz, ~33 msec.
 ISR(TIMER2_OVF_vect) {
-  if(bCount >= 76) {              // ~2.5 second hold
+  if(bCount >= 60) {              // ~2 second hold
     TIMSK2 &= ~_BV(TOIE2);        // Stop interrupt
     if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
     else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;

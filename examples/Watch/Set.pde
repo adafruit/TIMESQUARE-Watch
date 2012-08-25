@@ -80,81 +80,229 @@ PROGMEM uint8_t odoDigits[] = { // 21x80 bitmap
   0x00,0x00,0x00,0x00,0x00,0x00,0x0a,0x23,0x0a,0x6d,0x15,0x6d,0xc8,0x15,0xc8,0xb6,0x23,0xb6,0x15,0x49,0x15,
   0x00,0x00,0x00,0x00,0x00,0x00,0x48,0x23,0x48,0xc8,0x15,0xc8,0xc8,0x15,0xc8,0x48,0x23,0x48,0x00,0x00,0x00 };
 
-static int           x     = 0;
-static uint8_t       digit = 0;
-static uint8_t       foo[6];
-static const uint8_t xOffset[] = { 0, 4, 10, 14, 20, 24 },
-                     limit[]   = { 2, 9, 5, 9, 5, 9 };
-static uint8_t f = 0;
+#define SUBMODE_TIME 0
+#define SUBMODE_DATE 1
+#define SUBMODE_24HR 2
+
+#define DIGIT_HR0    0
+#define DIGIT_HR1    1
+#define DIGIT_MIN0   2
+#define DIGIT_MIN1   3
+#define DIGIT_SEC0   4
+#define DIGIT_SEC1   5
+#define DIGIT_YEAR0  6
+#define DIGIT_YEAR1  7
+#define DIGIT_MON0   8
+#define DIGIT_MON1   9
+#define DIGIT_DAY0  10
+#define DIGIT_DAY1  11
+
+static int8_t
+  submode = SUBMODE_TIME;
+static uint8_t
+  digit[12],
+  dNum    = 0, // Current digit # being edited
+  f       = 0; // Frame counter for cursor blink
+static int
+  x       = 0; // Horizontal position of current time/date display
+static const uint8_t
+//                   H   H : M   M : S   S   Y   Y . M   M . D   D
+  xOffset[]     = {  0,  4, 10, 14, 20, 24,  0,  4, 10, 14, 20, 24 },
+  limit[]       = {  2,  9,  5,  9,  5,  9,  9,  9,  1,  9,  3,  9 },
+  daysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+
 
 void mode_set(uint8_t action) {
-  int i, x2;
+  DateTime now;
+  int      x2;
+  int8_t   dir;
+  uint8_t  i, lim, m;
 
-  if(action == ACTION_TAP_LEFT) {
-    if(++digit >= 6) digit = 0;
-    x2 = -xOffset[digit] - 1 + 4;
-    if(x2 > 0) x2 = 0;
-    else if(x2 < -19) x2 = -19;
-    int8_t dir = (x2 > x) ? 1 : -1;
-    while(x != x2) {
-      watch.fillScreen(0);
-      drawTime();
-      watch.swapBuffers();
-      x += dir;
+  switch(action) {
+
+   case ACTION_HOLD_BOTH:
+    // Just arrived -- initialize time-setting mode.
+    dNum    = 0;
+    x       = 0;
+    submode = SUBMODE_TIME;
+    now     = RTC.now();
+    loadDigits(now.hour()       , DIGIT_HR0);
+    loadDigits(now.minute()     , DIGIT_MIN0);
+    loadDigits(now.second()     , DIGIT_SEC0);
+    loadDigits(now.year() - 2000, DIGIT_YEAR0);
+    loadDigits(now.month()      , DIGIT_MON0);
+    loadDigits(now.day()        , DIGIT_DAY0);
+    break;
+
+   case ACTION_TAP_RIGHT:
+
+    switch(submode) {
+     case SUBMODE_TIME:
+     case SUBMODE_DATE:
+      // Animate current digit incrementing (unless digit #2 in a 30-day month)
+      if((dNum != DIGIT_DAY1) || (daysInMonth[digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1] - 1] != 30)) {
+        for(i=0;i<7;i++) {
+          drawTime();
+          blit(odoDigits, 24, 80, i * 3, digit[dNum] * 8, x + xOffset[dNum], 0, 3, 8);
+          watch.swapBuffers();
+        }
+      }
+      // Advance digit value
+      lim = limit[dNum];
+      if(submode == SUBMODE_TIME) { // Time-setting constraints
+        if((dNum == DIGIT_HR1) && (digit[DIGIT_HR0] == 2)) lim = 3; // Limit hour to 23
+        if(++digit[dNum] > lim) digit[dNum] = 0;
+        if((dNum == DIGIT_HR0) && (digit[DIGIT_HR0] == 2) && (digit[DIGIT_HR1] > 3)) digit[1] = 3;
+      } else { // Date-setting constraints
+        boolean leap;
+        if((dNum == DIGIT_MON1) && (digit[DIGIT_MON0] == 1)) lim = 2; // Limit month to 12
+        leap = !((digit[DIGIT_YEAR0] * 10 + digit[DIGIT_YEAR1]) & 3);
+        m    = digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1] - 1; // Month 0 - 11
+        if(m == 1) { // Feb
+          if(dNum == DIGIT_DAY0) {
+            lim = 2;
+          } else if(dNum == DIGIT_DAY1) {
+            lim = leap ? 9 : 8; // Second digit limit = 8 or 9, depending on leap year
+          }
+        } else {
+          if(digit[DIGIT_DAY0] == 3) { // Second digit limit = 0 or 1, depending on month
+            lim = (daysInMonth[x2] == 31) ? 1 : 0;
+          }
+        }
+        if(++digit[dNum] > lim) {
+          // Month and day can't be zero
+          if(dNum == DIGIT_MON1) {
+            digit[DIGIT_MON1] = (digit[DIGIT_MON0] == 0) ? 1 : 0;
+          } else if(dNum == DIGIT_DAY1) {
+            digit[DIGIT_DAY1] = (digit[DIGIT_DAY0] == 0) ? 1 : 0;
+          } else {
+            digit[dNum] = 0;
+          }
+        }
+        if(dNum == DIGIT_DAY0) {
+          if(digit[DIGIT_MON0] == 2) { // Feb
+            i = leap ? 9 : 8;
+            if(digit[DIGIT_DAY1] > i) digit[DIGIT_DAY1] = i;
+          } else { // Not Feb
+            i = (daysInMonth[m] > 30) ? 1 : 0;
+            if(digit[DIGIT_DAY1] > i) digit[DIGIT_DAY1] = i;
+          }
+        }
+      }
+      break;
+     case SUBMODE_24HR:
+      // Toggle 12/24 hr mode (w/animation)
+      // Will have a special 12/24 bitmap, but for now...
+      for(i=0;i<7;i++) {
+        blit(odoDigits, 24, 80, i * 3,  8, 0, 0, 3, 8);
+        blit(odoDigits, 24, 80, i * 3, 16, 4, 0, 3, 8);
+        watch.swapBuffers();
+      }
+      h24 = !h24;
+      break;
     }
-  } else if(action == ACTION_TAP_RIGHT) {
-    int lim;
-    for(uint8_t i=0;i<7;i++) {
-      watch.fillScreen(0);
-      drawTime();
-      blit(odoDigits, 24, 80, i * 3, foo[digit] * 8, x + xOffset[digit], 0, 3, 8);
-      watch.swapBuffers();
+
+    break;
+
+   case ACTION_TAP_LEFT:
+
+    if(submode == SUBMODE_24HR) {
+      // Toggle 12/24 hr mode (w/animation)
+      // Will have a special 12/24 bitmap, but for now...
+      for(i=0;i<7;i++) {
+        blit(odoDigits, 24, 80, i * 3,  8, 0, 0, 3, 8);
+        blit(odoDigits, 24, 80, i * 3, 16, 4, 0, 3, 8);
+        watch.swapBuffers();
+      }
+      h24 = !h24;
+    } else {
+      // Advance to next digit position
+      dNum++;
+      if(submode == SUBMODE_TIME) {
+        if(dNum > DIGIT_SEC1)  dNum = DIGIT_HR0;
+      } else {
+        if(dNum > DIGIT_DAY1) dNum = DIGIT_YEAR0;
+      }
+      x2 = -xOffset[dNum] - 1 + 4;
+      if(x2 > 0) x2 = 0;
+      else if(x2 < -19) x2 = -19;
+      dir = (x2 > x) ? 1 : -1;
+      while(x != x2) {
+        drawTime();
+        watch.swapBuffers();
+        x += dir;
+      }
     }
-    lim = limit[digit];
-    if((digit == 1) && (foo[0] == 2)) lim = 3;
-    if(++foo[digit] > lim) foo[digit] = 0;
-    if((digit == 0) && (foo[0] == 2) && (foo[1] > 3)) foo[1] = 3;
-  } else {
-    if(action >= ACTION_HOLD_LEFT) {
-      // Set up time-setting mode
-      DateTime       now;
-      now = RTC.now();
-      i  = now.hour();
-      foo[0] = i / 10;
-      foo[1] = i - (foo[0] * 10);
-      i  = now.minute();
-      foo[2] = i / 10;
-      foo[3] = i - (foo[2] * 10);
-      i  = now.second();
-      foo[4] = i / 10;
-      foo[5] = i - (foo[4] * 10);
-      digit = 0;
-      x     = 0;
-    }
-    watch.fillScreen(0);
-    drawTime();
+    break;
+
+   case ACTION_HOLD_RIGHT:
+    // Next time-setting sub-mode (time/date/24hr)
+    if(++submode > SUBMODE_24HR) submode = SUBMODE_TIME;
+    x    = 0;
+    dNum = (submode == SUBMODE_DATE) ? DIGIT_YEAR0 : DIGIT_HR0;
+    break;
+
+   case ACTION_HOLD_LEFT:
+    // Prev time-setting sub-mode (time/date/24hr)
+    if(--submode < SUBMODE_TIME) submode = SUBMODE_24HR;
+    x    = 0;
+    dNum = (submode == SUBMODE_DATE) ? DIGIT_YEAR0 : DIGIT_HR0;
+    break;
   }
+
+  drawTime();
 }
 
 void drawTime() {
-  for(uint8_t i = 0; i < 6; i++) {
-    blit(odoDigits, 21, 80, 0, foo[i] * 8 + 1, x + xOffset[i], 1, 3, 5);
-  }
-  watch.drawPixel(x + 8, 2, 0xff);
-  watch.drawPixel(x + 8, 4, 0xff);
-  watch.drawPixel(x + 18, 2, 0xff);
-  watch.drawPixel(x + 18, 4, 0xff);
+  uint8_t i;
 
-  if(f & 0x10) watch.drawLine(x + xOffset[digit], 7, x + xOffset[digit] + 2, 7, 0xFF);
+  watch.fillScreen(0);
+
+  switch(submode) {
+   case SUBMODE_TIME:
+    for(i = DIGIT_HR0; i <= DIGIT_SEC1; i++)
+      blit(odoDigits, 21, 80, 0, digit[i] * 8 + 1, x + xOffset[i], 1, 3, 5);
+    watch.drawPixel(x +  8, 2, 0xff);
+    watch.drawPixel(x +  8, 4, 0xff);
+    watch.drawPixel(x + 18, 2, 0xff);
+    watch.drawPixel(x + 18, 4, 0xff);
+   if(f & 0x10) watch.drawLine(x + xOffset[dNum], 7, x + xOffset[dNum] + 2, 7, 0xFF);
+    break;
+   case SUBMODE_DATE:
+    for(i = DIGIT_YEAR0; i <= DIGIT_DAY1; i++)
+      blit(odoDigits, 21, 80, 0, digit[i] * 8 + 1, x + xOffset[i], 1, 3, 5);
+    watch.drawPixel(x +  8, 3, 0xff);
+    watch.drawPixel(x + 18, 3, 0xff);
+   if(f & 0x10) watch.drawLine(x + xOffset[dNum], 7, x + xOffset[dNum] + 2, 7, 0xFF);
+    break;
+   case SUBMODE_24HR:
+    if(h24) {
+      blit(odoDigits, 21, 80, 0, 17, 0, 1, 3, 5); // 2
+      blit(odoDigits, 21, 80, 0, 33, 4, 1, 3, 5); // 4
+    } else {
+      blit(odoDigits, 21, 80, 0,  9, 0, 1, 3, 5); // 1
+      blit(odoDigits, 21, 80, 0, 17, 4, 1, 3, 5); // 2
+    }
+   if(f & 0x10) watch.drawLine(0, 7, 6, 7, 0xFF);
+    break;
+  }
+
   if(++f >= 32) f = 0;
 }
 
 void set() {
-  DateTime before;
-  before = RTC.now();
-  DateTime after(before.year(), before.month(), before.day(),
-    foo[0] * 10 + foo[1],  // hh
-    foo[2] * 10 + foo[3],  // mm
-    foo[4] * 10 + foo[5]); // ss
-  RTC.adjust(after);
+  DateTime dt(
+    digit[DIGIT_YEAR0 ] * 10 + digit[DIGIT_YEAR1] + 2000,
+    digit[DIGIT_MON0  ] * 10 + digit[DIGIT_MON1 ],
+    digit[DIGIT_DAY0  ] * 10 + digit[DIGIT_DAY1 ],
+    digit[DIGIT_HR0   ] * 10 + digit[DIGIT_HR1  ],
+    digit[DIGIT_MIN0  ] * 10 + digit[DIGIT_MIN1 ],
+    digit[DIGIT_SEC0  ] * 10 + digit[DIGIT_SEC1 ]);
+  RTC.adjust(dt);
 }
+
+static void loadDigits(int in, uint8_t idx) {
+  digit[idx    ] = in / 10;
+  digit[idx + 1] = in - (digit[idx] * 10);
+}
+
