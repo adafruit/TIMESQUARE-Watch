@@ -1,3 +1,23 @@
+/*
+Idea: have both 8-bit (high quality) and 1-bit (low power) display
+modes.  The time-setting code can use the 1-bit stuff (since it's
+seldom seen), and the display code has the option of 8-bit display.
+This will save a ton of power during the initial (lengthy) time-
+setting process.
+
+Power-down code will all be moved here, not just the higher-level stuff.
+Watch modes will just set a timeout variable (or call a function to set
+it) rather than invoking sleep directly.  Timer counter will count DOWN
+rather than up.  Go to deep sleep when it reaches 0.  Any operation while
+on (button press, etc.) just resets the counter to a higher number.
+This way the counter can also be used for a nice fade out on the display
+(rather than just shutting off when sleeping).  Counter will need to be
+a 16-bit type for longer timeouts to work.
+*/
+
+
+
+
 // Library for Adafruit 8x8 LED matrix watch.  This version displays 8-bit
 // monochrome graphics with one row enabled at any given time, using a fast
 // timer interrupt and bit angle modulation (vs PWM).
@@ -9,7 +29,10 @@
  #include "WProgram.h"
  #include "pins_arduino.h"
 #endif
+#include <Wire.h>
 #include <avr/pgmspace.h>
+#include <avr/power.h>
+#include <avr/sleep.h>
 #include "Watch.h"
 
 // Some of this code might be painful to read in that 'row' and 'column'
@@ -81,6 +104,18 @@ Watch::Watch(boolean dbuf) {
 
 // Initialize PORT registers and enable timer and button interrupts.
 void Watch::begin() {
+
+  // Disable unused peripherals
+  ADCSRA &= ~_BV(ADEN); // ADC off
+  // Timer0 interrupt is disabled as this throws off the delicate PWM
+  // timing.  Unfortunately this means delay(), millis() won't work,
+  // so we have our own methods instead for passing time.
+  TIMSK0 = 0;
+  power_adc_disable();
+  power_spi_disable();
+  power_timer0_disable();
+  power_usart0_disable();
+
   PORTB = PORTB_OFF; // Turn all rows/columns off
   PORTC = PORTC_OFF;
   PORTD = PORTD_OFF;
@@ -94,15 +129,12 @@ void Watch::begin() {
   OCR1A   = 100;
   TIMSK1 |= _BV(OCIE1A);
 
-  // Timer0 interrupt is disabled as this throws off the delicate PWM
-  // timing.  Unfortunately this means delay(), millis() won't work,
-  // so we have our own function later for passing time.
-  TIMSK0 = 0;
-
   // Set up Timer2 for button-hold counter.  Mode 0, OC2A off, 1024x prescale.
   TCCR2A = 0;
   TCCR2B = _BV(CS22) | _BV(CS21) | _BV(CS20);
   // Timer2 interrupt is not enabled until a button is pressed.
+// Will likely remove Timer2 use and instead use Timer1 counter for
+// double duty.
 
   // Set up interrupt-on-change for buttons.
   EICRA = _BV(ISC10)  | _BV(ISC00);  // Trigger on any logic change
@@ -261,6 +293,10 @@ ISR(INT0_vect) {
 
 ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
 
+// Maybe change this to 100 Hz interval for easier timeout math.
+// On the other hand, minimizing interrupts will keep display looking
+// smoother, and provides more deep sleep opportunities.
+
 // Overflow = 256 * 1024 inst.  8MHz / (256 * 1024) = ~30.5 Hz, ~33 msec.
 ISR(TIMER2_OVF_vect) {
   if(bCount >= 60) {              // ~2 second hold
@@ -270,5 +306,55 @@ ISR(TIMER2_OVF_vect) {
     else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
     bSave = bCount = 0;           // So button release code isn't confused
   } else bCount++;                // else keep counting...
+}
+
+// Puts watch into extremely low-power state, disabling all peripherals and
+// brownout detection.  Resumes on pin change interrupt (either button).
+void Watch::sleep(void) {
+
+  unsigned char tmp;
+
+  // Set all ports to high-impedance input mode, enable pullups
+  // on all pins (seems to use ever-so-slightly less sauce).
+  DDRB  = 0   ; DDRC  = 0   ; DDRD  = 0;
+  PORTB = 0xff; PORTC = 0xff; PORTD = 0xff;
+
+  TCCR2B = 0; // Stop Timer2
+  power_timer2_disable();
+  power_timer1_disable();
+  power_twi_disable();
+
+  // BOD disable code adapted from Rocket Scream's LowPower library
+  // https://github.com/rocketscream/Low-Power
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+  cli();
+  sleep_enable();
+  asm volatile(
+    "in   %[tmp]  , %[mcucr]\n"
+    "ori  %[tmp]  , %[bods_bodse]\n"
+    "out  %[mcucr], %[tmp]\n"
+    "andi %[tmp]  , %[not_bodse]\n"
+    "out  %[mcucr], %[tmp]" :
+    [tmp]        "=&d"(tmp) :
+    [mcucr]      "I"  _SFR_IO_ADDR(MCUCR),
+    [bods_bodse] "i"  (_BV(BODS) | _BV(BODSE)),
+    [not_bodse]  "i"  (~_BV(BODSE)));
+  sei();
+  sleep_cpu();
+  // Execution resumes here on wake
+
+  // Enable only those peripherals used by the watch code
+  power_twi_enable();
+  Wire.begin(); // App note recommends reinitializing TWI on wake
+  power_timer1_enable();
+  power_timer2_enable();
+  TCCR2B = _BV(CS22) | _BV(CS21) | _BV(CS20); // Restore Timer2 settings
+
+  PORTB = PORTB_OFF; // Turn all rows/columns off
+  PORTC = PORTC_OFF;
+  PORTD = PORTD_OFF;
+  DDRB  = B11111111; // And enable outputs
+  DDRC  = B00001111;
+  DDRD  = B11110000;
 }
 

@@ -125,6 +125,7 @@ void mode_set(uint8_t action) {
     dNum    = 0;
     x       = 0;
     submode = SUBMODE_TIME;
+    showSubmode();
     now     = RTC.now();
     loadDigits(now.hour()       , DIGIT_HR0);
     loadDigits(now.minute()     , DIGIT_MIN0);
@@ -238,6 +239,7 @@ void mode_set(uint8_t action) {
    case ACTION_HOLD_RIGHT:
     // Next time-setting sub-mode (time/date/24hr)
     if(++submode > SUBMODE_24HR) submode = SUBMODE_TIME;
+    if(submode != SUBMODE_24HR) showSubmode();
     x    = 0;
     dNum = (submode == SUBMODE_DATE) ? DIGIT_YEAR0 : DIGIT_HR0;
     break;
@@ -245,12 +247,21 @@ void mode_set(uint8_t action) {
    case ACTION_HOLD_LEFT:
     // Prev time-setting sub-mode (time/date/24hr)
     if(--submode < SUBMODE_TIME) submode = SUBMODE_24HR;
+    if(submode != SUBMODE_24HR) showSubmode();
     x    = 0;
     dNum = (submode == SUBMODE_DATE) ? DIGIT_YEAR0 : DIGIT_HR0;
     break;
   }
 
   drawTime();
+}
+
+void showSubmode() {
+  watch.fillScreen(BACKGROUND);
+  watch.setCursor(1,0);
+  watch.print((submode == SUBMODE_DATE) ? 'D' : 'T');
+  watch.swapBuffers();
+  watch.delay(20);
 }
 
 void drawTime() {

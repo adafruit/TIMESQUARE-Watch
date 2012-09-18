@@ -15,6 +15,8 @@ Tap left button to advance to next digit.
 Hold both buttons to return to time display mode.
 */
 
+#include <avr/sleep.h>
+#include <avr/power.h>
 #include <Wire.h>
 #include <RTClib.h>
 #include <Adafruit_GFX.h>
@@ -34,7 +36,7 @@ void (*modeFunc[])(uint8_t) = {
 Watch      watch(true); // Use double-buffered animation
 RTC_DS1307 RTC;
 uint8_t    mode = MODE_MARQUEE, mode_last = MODE_MARQUEE;
-boolean    h24  = false;
+boolean    h24  = false, sleepFlag = false;
 
 void setup() {
   DateTime now;
@@ -78,6 +80,11 @@ void loop() {
 
   (*modeFunc[mode])(a); // Action is passed to clock-drawing function
   watch.swapBuffers();
+
+  if(sleepFlag == true) {
+    watch.sleep();
+    sleepFlag = false;
+  }
 }
 
 // To do: add some higher-level clipping here

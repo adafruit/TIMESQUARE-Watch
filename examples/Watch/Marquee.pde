@@ -20,6 +20,7 @@ PROGMEM uint8_t marqueeDigits[] = { // 44x6 bitmap
 void mode_marquee(uint8_t action) {
   static uint8_t f = 0;
   static int     x = 8;
+  static uint8_t passes = 0;
   DateTime       now;
   int            i, h1, h2, m1, m2, s1, s2;
 
@@ -52,7 +53,14 @@ void mode_marquee(uint8_t action) {
 
   // Every fourth frame, shift text left 1 pixel
   if(++f >= 4) {
-    if(--x < -32) x = 8;
+    if(--x < -32) {
+      x = 8;
+      passes++;
+      if(passes >= 2) {
+        passes = 0;
+        sleepFlag = true;
+      }
+    }
     f = 0;
   }
 }
