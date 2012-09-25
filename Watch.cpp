@@ -75,7 +75,8 @@ static volatile uint8_t
   bSave,                  // Last button state
   bCount   = 0,           // Timer2 overflow counter
   bAction  = ACTION_NONE, // Last button action
-  frames   = 0; // For delay() counter
+  frames   = 0,           // For delay() counter
+  mode     = MODE_8BIT;   // Default display mode = 8-bit
 static volatile boolean
   swapFlag = false;
 
@@ -111,6 +112,8 @@ void Watch::begin() {
   // timing.  Unfortunately this means delay(), millis() won't work,
   // so we have our own methods instead for passing time.
   TIMSK0 = 0;
+  // Disable peripherals that aren't used by this code,
+  // maybe save a tiny bit of power.
   power_adc_disable();
   power_spi_disable();
   power_timer0_disable();
@@ -149,28 +152,34 @@ void Watch::swapBuffers(boolean copy) {
   // Swap actually takes place at specific point in interrupt.
   // Set flag to request swap, then wait for change to complete:
   for(swapFlag = true; swapFlag; );
-  if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * 8);
+  if(copy) {
+    memcpy(img[1 - frontIdx], img[frontIdx],
+      (mode == MODE_8BIT) ? (3 * 8 * 8) : (3 * 8));
+  }
 }
 
 // Basic pixel-drawing function for Adafruit_GFX.
 void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
   if((x >= 0) && (y >= 0) && (x < 8) && (y < 8)) {
-    uint8_t bmask = rowBitPortB[x],
-            cmask = rowBitPortC[x],
-            dmask = rowBitPortD[x],
-            c8    = (uint8_t)c,
-            *p    = (uint8_t *)&img[1 - frontIdx][y * 3];
-    for(uint8_t bit = 1; bit; bit <<= 1) {
-      if(c8 & bit) {
-        p[0] |=  bmask;
-        p[1] |=  cmask;
-        p[2] |=  dmask;
-      } else {
-        p[0] &= ~bmask;
-        p[1] &= ~cmask;
-        p[2] &= ~dmask;
+    if(mode == MODE_8BIT) {
+      uint8_t bmask = rowBitPortB[x],
+              cmask = rowBitPortC[x],
+              dmask = rowBitPortD[x],
+              c8    = (uint8_t)c,
+              *p    = (uint8_t *)&img[1 - frontIdx][y * 3];
+      for(uint8_t bit = 1; bit; bit <<= 1) {
+        if(c8 & bit) {
+          p[0] |=  bmask;
+          p[1] |=  cmask;
+          p[2] |=  dmask;
+        } else {
+          p[0] &= ~bmask;
+          p[1] &= ~cmask;
+          p[2] &= ~dmask;
+        }
+        p += 24;
       }
-      p += 24;
+    } else {
     }
   }
 }
@@ -241,6 +250,8 @@ uint8_t Watch::action(void) {
 // reduced and a a better refresh rate should be possible.  Already
 // unrolled this (e.g. no array lookups), just needs a bit more TLC.
 ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
+
+// Make this do 1-bit/8-bit magic now
 
   uint8_t *p = (uint8_t *)ptr;
 
@@ -356,5 +367,25 @@ void Watch::sleep(void) {
   DDRB  = B11111111; // And enable outputs
   DDRC  = B00001111;
   DDRD  = B11110000;
+}
+
+Watch::setMode(uint8_t newMode) {
+
+  if(mode == newMode) return;  // Same mode as before -- do nothing
+  mode = newMode;
+
+  switch(mode) {
+   case MODE_1BIT:
+    break;
+   case MODE_8BIT:
+    break;
+  }
+
+// Stop current interrupt at last position
+// Clear display buffers (front and back)
+// Reset row/plane counters
+// Start interrupt anew
+
+
 }
 

@@ -41,9 +41,10 @@ boolean    h24  = false, sleepFlag = false;
 void setup() {
   DateTime now;
 
-//  Serial.begin(9600);
+  Serial.begin(9600);
   Wire.begin();
   RTC.begin();
+
   now = RTC.now();
   // If clock is unset, set it to compile time and jump to time-setting mode
   if((now.year() == 2000) && (now.month()  == 1) && (now.day()    == 1) &&
