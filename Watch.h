@@ -10,9 +10,6 @@
 #define ACTION_HOLD_RIGHT 4
 #define ACTION_HOLD_BOTH  5
 
-#define MODE_1BIT 0
-#define MODE_8BIT 1
-
 class Watch : public Adafruit_GFX {
 
  public:
@@ -23,13 +20,13 @@ class Watch : public Adafruit_GFX {
     begin(void),
     drawPixel(int16_t x, int16_t y, uint16_t c),
     swapBuffers(boolean copy=false),
-    delay(uint8_t),
-    setMode(uint8_t mode),
-    sleep(void);
+    delay(uint8_t d),
+    setTimeout(uint16_t t);
   uint8_t
     action(void),
     *backBuffer(void);
-
+  uint16_t
+    getTimeout(void);
 };
 
 #endif // _WATCH_H_

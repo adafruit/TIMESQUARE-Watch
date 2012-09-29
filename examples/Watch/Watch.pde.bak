@@ -25,7 +25,6 @@ Hold both buttons to return to time display mode.
 #define MODE_SET     0
 #define MODE_MARQUEE 1
 #define MODE_BINARY  2
-// Additional display modes will be listed here
 
 void (*modeFunc[])(uint8_t) = {
   mode_set,
@@ -37,7 +36,7 @@ void (*modeFunc[])(uint8_t) = {
 Watch      watch(true); // Use double-buffered animation
 RTC_DS1307 RTC;
 uint8_t    mode = MODE_MARQUEE, mode_last = MODE_MARQUEE;
-boolean    h24  = false; // 24-hour display mode
+boolean    h24  = false, sleepFlag = false;
 
 void setup() {
   DateTime now;
@@ -53,7 +52,6 @@ void setup() {
     RTC.adjust(DateTime(__DATE__, __TIME__));
     mode = MODE_SET;
   }
-  watch.setTimeout(260);
   watch.begin();
 }
 
@@ -83,6 +81,11 @@ void loop() {
 
   (*modeFunc[mode])(a); // Action is passed to clock-drawing function
   watch.swapBuffers();
+
+  if(sleepFlag == true) {
+    watch.sleep();
+    sleepFlag = false;
+  }
 }
 
 // To do: add some higher-level clipping here

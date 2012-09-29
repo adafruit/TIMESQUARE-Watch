@@ -6,7 +6,9 @@ void mode_binary(uint8_t action) {
   DateTime now;
   uint8_t  h, m, s, x, bit;
 
-  if(action < ACTION_HOLD_LEFT) watch.delay(10);
+  // Reset sleep timeout on any button action, even
+  // if it has no consequences in the current mode.
+  if(action != ACTION_NONE) watch.setTimeout(650); // ~10 sec
 
   now = RTC.now();
   h   = now.hour();
