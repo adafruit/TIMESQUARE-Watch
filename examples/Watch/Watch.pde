@@ -47,7 +47,7 @@ boolean    h24  = false; // 24-hour display mode
 void setup() {
   DateTime now;
 
-  // Serial.begin(9600); // Only works if serial port enabled in watch library
+   Serial.begin(9600); // Only works if serial port enabled in watch library
   Wire.begin();
   RTC.begin();
 

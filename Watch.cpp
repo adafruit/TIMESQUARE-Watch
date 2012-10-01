@@ -57,7 +57,8 @@ static volatile uint8_t
   bAction  = ACTION_NONE, // Last button action
   frames   = 0;           // Counter for delay()
 static volatile boolean
-  swapFlag = false;
+  swapFlag = false,
+  wakeFlag = false;
 static volatile uint16_t
   timeout = 0;            // Countdown to sleep() (in frames)
 
@@ -100,7 +101,7 @@ void Watch::begin() {
   power_timer2_disable();
   power_timer0_disable();
   // Comment out this line to use Serial for debugging, etc.:
-  power_usart0_disable();
+//  power_usart0_disable();
 
   PORTB   = PORTB_OFF; // Turn all rows/columns off
   PORTC   = PORTC_OFF;
@@ -214,9 +215,11 @@ static void sleep(void) {
     [not_bodse]  "i"  (~_BV(BODSE)));
   sei();
   sleep_cpu();
+  // Execution resumes here on wake.
 
-  // Execution resumes here on wake
-  bAction = ACTION_WAKE;
+  // wakeFlag stops clicks from falling through on wake
+  // (e.g first click won't advance digit in time-setting mode).
+  wakeFlag = true;
 
   // Enable only those peripherals used by the watch code
   power_twi_enable();
@@ -328,6 +331,9 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
   TCNT1 = 0;
 }
 
+// bAction is already parsed by the time
+// the release is registered.
+// Could instead have a special flag of some sort
 ISR(INT0_vect) {
 
   uint8_t b = PIND & (_BV(PORTD3) | _BV(PORTD2));
@@ -338,8 +344,15 @@ ISR(INT0_vect) {
 
   if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
     if((bCount > 4)) {                   // Past debounce threshold?
-      if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;
-      else if(bSave == _BV(PORTD2)) bAction = ACTION_TAP_RIGHT;
+      if(wakeFlag == true) {
+        // First click (release) on wake does NOT perform corresponding
+        // action (e.g. don't advance digit in time-setting mode).
+        bAction  = ACTION_WAKE;
+        wakeFlag = false;
+      } else {
+        if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;
+        else if(bSave == _BV(PORTD2)) bAction = ACTION_TAP_RIGHT;
+      }
     }
   } else if(b != bSave) bCount = 0; // Button press; clear debounce counter
   bSave = b; // Note last button state

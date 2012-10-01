@@ -248,6 +248,7 @@ static int
 static const uint8_t
 //                   Y   Y . M   M . D   D   H   H : M   M : S   S  24
   xOffset[]     = {  0,  4, 10, 14, 20, 24, 30, 34, 40, 44, 50, 54, 58 },
+  xScroll[]     = {  0,  1,  8, 11, 18, 21, 28, 31, 38, 41, 48, 51, 55 },
   limit[]       = {  9,  9,  1,  9,  3,  9,  2,  9,  5,  9,  5,  9,  1 },
   daysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
@@ -279,15 +280,18 @@ void mode_set(uint8_t action) {
     break;
 
    case ACTION_TAP_RIGHT:
+    // Increase digit value, wrap around as appropriate
+
+    if(dNum == DIGIT_24) h24 = !h24;
+
     break;
 
    case ACTION_TAP_LEFT:
 
     // Advance to next digit position
+// after 12/24, will probably make this go back to time display mode
     if(++dNum > DIGIT_24) dNum = DIGIT_YEAR0;
-    destX = -xOffset[dNum] - 1 + 4;
-    if     (destX >   0) destX =   0;
-    else if(destX < -59) destX = -59;
+    destX = -xScroll[dNum];
 
     // When switching to first digit of new section, fade out corresponding symbol
     if((dNum == DIGIT_YEAR0) || (dNum == DIGIT_MON0) || (dNum == DIGIT_DAY0) ||
@@ -312,8 +316,9 @@ void mode_set(uint8_t action) {
     switch(submode) {
      case SUBMODE_TIME:
      case SUBMODE_DATE:
-// If advancing to first digit, show 'Y', 'M' etc in the digits' place (briefly)
+
       // Animate current digit incrementing (unless digit #2 in a 30-day month)
+// Advancing digits will use special animations now (e.g. 3 to 0)
       if((dNum != DIGIT_DAY1) || (daysInMonth[digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1] - 1] != 30)) {
         for(i=0;i<7;i++) {
           drawTime();
@@ -321,6 +326,9 @@ void mode_set(uint8_t action) {
           watch.swapBuffers();
         }
       }
+
+
+
       // Advance digit value
       lim = limit[dNum];
 // No submodes...now have digit stuff
@@ -379,7 +387,9 @@ void mode_set(uint8_t action) {
 */
 
 // This was tap left:
-// 12/24 will be at end of date/time string
+
+// New plan: left tap at end of time-setting = go to time display mode
+// (don't cycle back to year)
 /*
     if(submode == SUBMODE_24HR) {
       // Toggle 12/24 hr mode (w/animation)
@@ -429,6 +439,8 @@ void drawTime() {
   uint8_t b = (symFade < sizeof(fade)) ?
     ((brightness * ((uint8_t)pgm_read_byte(&fade[symFade]) + 1)) >> 8) : brightness;
 
+  // Can very likely loopify this -- no need for special code for every pair of digits!
+
   if((dNum == DIGIT_YEAR0) && symFade) {
     // draw fading 'Y'
     blit(symbols, 17, 5, 0, 0, curX + xOffset[0] + 1, 1, 5, 5, b);
@@ -456,6 +468,40 @@ void drawTime() {
     blit(odoDigits, 21, 136, 0, digit[5] * 8 + 1, curX + xOffset[5], 1, 3, 5, brightness);
   }
 
+  if((dNum == DIGIT_HR0) && symFade) {
+    // draw fading 'H'
+    blit(symbols, 17, 5, 9, 0, curX + xOffset[6] + 2, 1, 3, 5, b);
+  } else {
+    // draw YY digits
+    blit(odoDigits, 21, 136, 0, digit[6] * 8 + 1, curX + xOffset[6], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[7] * 8 + 1, curX + xOffset[7], 1, 3, 5, brightness);
+  }
+
+  if((dNum == DIGIT_MIN0) && symFade) {
+    // draw fading 'M'
+    blit(symbols, 17, 5, 5, 0, curX + xOffset[8] + 1, 1, 5, 5, b);
+  } else {
+    // draw YY digits
+    blit(odoDigits, 21, 136, 0, digit[8] * 8 + 1, curX + xOffset[8], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[9] * 8 + 1, curX + xOffset[9], 1, 3, 5, brightness);
+  }
+
+  if((dNum == DIGIT_SEC0) && symFade) {
+    // draw fading 'S'
+    blit(symbols, 17, 5, 14, 0, curX + xOffset[10] + 1, 1, 3, 5, b);
+  } else {
+    // draw YY digits
+    blit(odoDigits, 21, 136, 0, digit[10] * 8 + 1, curX + xOffset[10], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[11] * 8 + 1, curX + xOffset[11], 1, 3, 5, brightness);
+  }
+
+  // draw 12/24
+  if(h24) {
+    blit(odo24, 35, 16, 0, 8, curX + xOffset[12], 0, 5, 8, brightness);
+  } else {
+    blit(odo24, 35, 16, 0, 0, curX + xOffset[12], 0, 5, 8, brightness);
+  }
+
   // Add punctuation
   watch.drawPixel(curX +  8, 3, brightness);
   watch.drawPixel(curX + 18, 3, brightness);
@@ -464,68 +510,9 @@ void drawTime() {
 
   // And underline current digit
  if(curBlnk & 0x10) {
-   watch.drawLine(curX + xOffset[dNum], 7, curX + xOffset[dNum] + 2, 7, brightness);
+     watch.drawLine(curX + xOffset[dNum], 7,
+     curX + xOffset[dNum] + ((dNum == DIGIT_24) ? 4 : 2), 7, brightness);
  }
-
-
-
-#ifdef SLART
-
-
-    /*
-  } else if(dNum == DIGIT_MON0) {
-  } else if(dNum == DIGIT_DAY0) {
-  } else if(dNum == DIGIT_HR0) {
-  } else if(dNum == DIGIT_MIN0) {
-  } else if(dNum == DIGIT_SEC0) {
-  }
-*/
-
-
-
-//          if(dNum == DIGIT_YEAR0) {
-// temporarily show 'Y' instead of both year digits
-// can make this fade out like everything else,
-// or make it cross-fade or something.  Or is this excessive?
-// Ah, blit doesn't handle transparency yet.
-
-// Draw all digits (in loop), then add punctuation
-
-// Wait -- won't always blit digits, will sometimes instead highlight section (Y, M, etc.)
-// draw digits in pairs.  Have flag indicating that we're advancing, and what
-// pair to replace with text label
-// Have a counter.  If we're within that counter period, draw number (fading)
-// outside the counter period, draw 2 digits normally.
-
-
-  // Draw all digits...
-  for(i = DIGIT_YEAR0; i <= DIGIT_SEC1; i += 2)
-//    if(something) {
-    if(0) {
-      // Draw Y, M, etc. label in place of numbers
-    } else {
-      // Draw 2 digits
-      blit(odoDigits, 21, 80, 0, digit[i    ] * 8 + 1, x + xOffset[i    ], 1, 3, 5);
-      blit(odoDigits, 21, 80, 0, digit[i + 1] * 8 + 1, x + xOffset[i + 1], 1, 3, 5);
-    }
-  }
-
-  if(h24) {
-    blit(odoDigits, 21, 80, 0, 17, 0, 1, 3, 5); // 2
-    blit(odoDigits, 21, 80, 0, 33, 4, 1, 3, 5); // 4
-  } else {
-    blit(odoDigits, 21, 80, 0,  9, 0, 1, 3, 5); // 1
-    blit(odoDigits, 21, 80, 0, 17, 4, 1, 3, 5); // 2
-  }
-
-  // Then add punctuation...
-
-
-// 12/24 switch:
-//   if(f & 0x10) watch.drawLine(0, 7, 6, 7, 0xFF);
-
-#endif // SLART
-
 }
 
 void set() {
