@@ -34,6 +34,11 @@ void (*modeFunc[])(uint8_t) = {
 };
 #define N_MODES (sizeof(modeFunc) / sizeof(modeFunc[0]))
 
+// Used by various display modes for smooth fade-out before sleep
+PROGMEM uint8_t fade[] = {
+   0,  1,  1,  2,  4,  5,  8, 10, 13, 17, 22, 27, 32, 39, 46,
+  53, 62, 71, 82, 93,105,117,131,146,161,178,196,214,234,255 };
+
 Watch      watch(true); // Use double-buffered animation
 RTC_DS1307 RTC;
 uint8_t    mode = MODE_MARQUEE, mode_last = MODE_MARQUEE;
@@ -42,7 +47,8 @@ boolean    h24  = false; // 24-hour display mode
 void setup() {
   DateTime now;
 
-  Serial.begin(9600);
+  // Serial port must be enabled in watch library to use this:
+  // Serial.begin(9600);
   Wire.begin();
   RTC.begin();
 
@@ -53,7 +59,7 @@ void setup() {
     RTC.adjust(DateTime(__DATE__, __TIME__));
     mode = MODE_SET;
   }
-  watch.setTimeout(260);
+  watch.setTimeout(WATCH_FPS * 4);
   watch.begin();
 }
 
@@ -86,11 +92,14 @@ void loop() {
 }
 
 // To do: add some higher-level clipping here
-void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h) {
-  int x, y;
+void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h, uint8_t b) {
+  int      x, y;
+  uint16_t b1 = (uint16_t)b + 1; // +1 so that >>8 (rther than /255) can be used
+
   for(y=0; y<h; y++) {
     for(x=0;x<w;x++) {
-      watch.drawPixel(dx + x, dy + y, pgm_read_byte(&img[(sy + y) * iw + sx + x]));
+      watch.drawPixel(dx + x, dy + y,
+        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 8);
     }
   }
 }

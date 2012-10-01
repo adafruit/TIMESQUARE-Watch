@@ -1,6 +1,6 @@
-// Library for Adafruit 8x8 LED matrix watch.  This version displays 8-bit
-// monochrome graphics with one row enabled at any given time, using a fast
-// timer interrupt and bit angle modulation (vs PWM).
+// Library for Adafruit 8x8 LED matrix watch.  Displays 8-bit monochrome
+// graphics with one row enabled at any given time, using a fast timer
+// interrupt and bit angle modulation (vs PWM).
 // (C) Adafruit Industries.
 
 #if ARDUINO >= 100
@@ -46,7 +46,7 @@ static const uint8_t
 // the matrix-specific variables and such are simply declared in the code
 // here rather than in private vars.  Keeps the interrupt code simple.
 static uint8_t
-  *img[2];                // Display data
+  *img[2];                // Pointers to 'front' and 'back' display buffers
 static volatile uint8_t
   plane    = 7,
   col      = 7,
@@ -59,7 +59,7 @@ static volatile uint8_t
 static volatile boolean
   swapFlag = false;
 static volatile uint16_t
-  timeout;                // Countdown to sleep()
+  timeout = 0;            // Countdown to sleep() (in frames)
 
 // Constructor: pass 'true' to enable double-buffering (default = false).
 Watch::Watch(boolean dbuf) {
@@ -82,8 +82,6 @@ Watch::Watch(boolean dbuf) {
     img[1] = img[0]; // Else both point to the same address
   }
   constructor(8, 8); // Init Adafruit_GFX
-
-  timeout = 0;
 }
 
 // Initialize PORT registers and enable timer and button interrupts.
@@ -101,6 +99,7 @@ void Watch::begin() {
   power_spi_disable();
   power_timer2_disable();
   power_timer0_disable();
+  // Comment out this line to use Serial for debugging, etc.:
   power_usart0_disable();
 
   PORTB   = PORTB_OFF; // Turn all rows/columns off
@@ -119,7 +118,7 @@ void Watch::begin() {
   // Set up interrupt-on-change for buttons.
   EICRA   = _BV(ISC10)  | _BV(ISC00);  // Trigger on any logic change
   EIMSK   = _BV(INT1)   | _BV(INT0);   // Enable interrupts on pins
-  bSave   = _BV(PORTD3) | _BV(PORTD2); // Get initial button state
+  bSave   = PIND & (_BV(PORTD3) | _BV(PORTD2)); // Get initial button state
 
   sei(); // Enable global interrupts
 }
@@ -215,7 +214,9 @@ static void sleep(void) {
     [not_bodse]  "i"  (~_BV(BODSE)));
   sei();
   sleep_cpu();
+
   // Execution resumes here on wake
+  bAction = ACTION_WAKE;
 
   // Enable only those peripherals used by the watch code
   power_twi_enable();
@@ -304,12 +305,14 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
         // Various counters, etc. occur before next frame starts.
 
         // Watch for button 'hold' conditions
-        if(bCount >= 130) {   // ~2 second hold
-          if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
-          else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
-          else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
-          bSave = bCount = 0;       // So button release code isn't confused
-        } else bCount++;            // else keep counting...
+        if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
+          if(bCount >= (WATCH_FPS * 2)) { // ~2 second hold
+            if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
+            else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
+            else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
+            bSave = bCount = 0;       // So button release code isn't confused
+          } else bCount++;            // else keep counting...
+        }
 
         if(frames > 0)   frames--;  // Counter for delay() function
         if(timeout > 0)  timeout--; // Counter for sleep timeout
@@ -329,17 +332,17 @@ ISR(INT0_vect) {
 
   uint8_t b = PIND & (_BV(PORTD3) | _BV(PORTD2));
 
-  // Any button press/release will reset timeout to ~2 sec.
+  // Any button press/release will reset timeout to ~4 sec.
   // Mode-specific code can override this based on action.
-  if(timeout < 130) timeout = 130;
+  if(timeout < (WATCH_FPS * 4)) timeout = (WATCH_FPS * 4);
 
   if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
     if((bCount > 4)) {                   // Past debounce threshold?
       if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;
       else if(bSave == _BV(PORTD2)) bAction = ACTION_TAP_RIGHT;
     }
-  } else if(b != bSave) bCount = 0; // Button press; debounce, clear count
-  bSave = b; // Note last button change
+  } else if(b != bSave) bCount = 0; // Button press; clear debounce counter
+  bSave = b; // Note last button state
 }
 
 ISR(INT1_vect, ISR_ALIASOF(INT0_vect));

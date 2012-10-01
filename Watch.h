@@ -9,6 +9,9 @@
 #define ACTION_HOLD_LEFT  3
 #define ACTION_HOLD_RIGHT 4
 #define ACTION_HOLD_BOTH  5
+#define ACTION_WAKE       6
+
+#define WATCH_FPS         65 // Approximate refresh frames/sec
 
 class Watch : public Adafruit_GFX {
 

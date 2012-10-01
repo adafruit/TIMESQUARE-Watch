@@ -21,12 +21,13 @@ void mode_marquee(uint8_t action) {
   static uint8_t f = 0;
   static int     x = 8;
   DateTime       now;
-  int            i, h1, h2, m1, m2, s1, s2;
+  int            i, h1, h2, m1, m2, s1, s2, t;
+  uint8_t        b;
 
   if(action != ACTION_NONE) {
     // Reset sleep timeout on any button action, even
     // if it has no consequences in the current mode.
-    watch.setTimeout(260);
+    watch.setTimeout(WATCH_FPS * 5);
     if(action >= ACTION_HOLD_LEFT) {
       // Just arrived here -- reset position, etc.
       x = 8;
@@ -35,7 +36,7 @@ void mode_marquee(uint8_t action) {
   }
 
   now = RTC.now();
-  i  = now.hour();
+  i   = now.hour();
   if((!h24) && (i > 12)) i -= 12;
   h1 = i / 10;
   h2 = i - (h1 * 10);
@@ -47,14 +48,15 @@ void mode_marquee(uint8_t action) {
   s2 = i - (s1 * 10);
 
   watch.fillScreen(0);
-  blit(marqueeDigits, 44, 6, h1 * 4, 0, x     , 1, 4, 6);
-  blit(marqueeDigits, 44, 6, h2 * 4, 0, x  + 5, 1, 4, 6);
-  blit(marqueeDigits, 44, 6, 40    , 0, x + 10, 1, 1, 6);
-  blit(marqueeDigits, 44, 6, m1 * 4, 0, x + 12, 1, 4, 6);
-  blit(marqueeDigits, 44, 6, m2 * 4, 0, x + 17, 1, 4, 6);
-  blit(marqueeDigits, 44, 6, 40    , 0, x + 22, 1, 1, 6);
-  blit(marqueeDigits, 44, 6, s1 * 4, 0, x + 24, 1, 4, 6);
-  blit(marqueeDigits, 44, 6, s2 * 4, 0, x + 29, 1, 4, 6);
+  b = ((t = watch.getTimeout()) < sizeof(fade)) ? (uint8_t)pgm_read_byte(&fade[t]) : 255;
+  blit(marqueeDigits, 44, 6, h1 * 4, 0, x     , 1, 4, 6, b);
+  blit(marqueeDigits, 44, 6, h2 * 4, 0, x  + 5, 1, 4, 6, b);
+  blit(marqueeDigits, 44, 6, 40    , 0, x + 10, 1, 1, 6, b);
+  blit(marqueeDigits, 44, 6, m1 * 4, 0, x + 12, 1, 4, 6, b);
+  blit(marqueeDigits, 44, 6, m2 * 4, 0, x + 17, 1, 4, 6, b);
+  blit(marqueeDigits, 44, 6, 40    , 0, x + 22, 1, 1, 6, b);
+  blit(marqueeDigits, 44, 6, s1 * 4, 0, x + 24, 1, 4, 6, b);
+  blit(marqueeDigits, 44, 6, s2 * 4, 0, x + 29, 1, 4, 6, b);
 
   // Every fourth frame, shift text left 1 pixel
   if(++f >= 4) {

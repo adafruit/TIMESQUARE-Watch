@@ -258,11 +258,12 @@ void mode_set(uint8_t action) {
 
   // Reset sleep timeout on any button action, even
   // if it has no consequences in the current mode.
-  if(action != ACTION_NONE) watch.setTimeout(650); // ~10 sec
+  if(action != ACTION_NONE) watch.setTimeout(WATCH_FPS * 10);
 
   switch(action) {
 
    case ACTION_HOLD_BOTH:
+   case ACTION_WAKE:
     // Just arrived -- initialize time-setting mode.
     dNum = 0;
     x    = 0;
@@ -397,28 +398,58 @@ void mode_set(uint8_t action) {
 #endif // SLART
 }
 
-/*
-void showSubmode() {
-  watch.fillScreen(BACKGROUND);
-  watch.setCursor(1,0);
-  watch.print((submode == SUBMODE_DATE) ? 'D' : 'T');
-  watch.swapBuffers();
-  watch.delay(20);
-}
-*/
+uint8_t foo;
 
 void drawTime() {
-#ifdef SLART
-
-  uint8_t i;
+  uint8_t  i, brightness;
+  uint16_t t;
 
   watch.fillScreen(0);
+
+  brightness = ((t = watch.getTimeout()) < sizeof(fade)) ?
+    ((255 * ((uint8_t)pgm_read_byte(&fade[t]) + 1)) >> 8) : 255;
+
+  uint8_t b = (foo < sizeof(fade)) ? ((brightness * ((uint8_t)pgm_read_byte(&fade[foo]) + 1)) >> 8) : brightness;
+
+  if((dNum == DIGIT_YEAR0) && (foo < sizeof(fade))) {
+    // draw fading 'Y'
+    blit(symbols, 17, 5, 0, 0, x+1, 1, 5, 5, b);
+  } else {
+    // draw YY digits
+    blit(odoDigits, 21, 136, 0, digit[i    ] * 8 + 1, x + xOffset[i    ], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[i + 1] * 8 + 1, x + xOffset[i + 1], 1, 3, 5, brightness);
+  }
+
+
+#ifdef SLART
+
+
+    /*
+  } else if(dNum == DIGIT_MON0) {
+  } else if(dNum == DIGIT_DAY0) {
+  } else if(dNum == DIGIT_HR0) {
+  } else if(dNum == DIGIT_MIN0) {
+  } else if(dNum == DIGIT_SEC0) {
+  }
+*/
+
+  if(foo > 0) foo--;
+
+
+//          if(dNum == DIGIT_YEAR0) {
+// temporarily show 'Y' instead of both year digits
+// can make this fade out like everything else,
+// or make it cross-fade or something.  Or is this excessive?
+// Ah, blit doesn't handle transparency yet.
 
 // Draw all digits (in loop), then add punctuation
 
 // Wait -- won't always blit digits, will sometimes instead highlight section (Y, M, etc.)
 // draw digits in pairs.  Have flag indicating that we're advancing, and what
 // pair to replace with text label
+// Have a counter.  If we're within that counter period, draw number (fading)
+// outside the counter period, draw 2 digits normally.
+
 
   // Draw all digits...
   for(i = DIGIT_YEAR0; i <= DIGIT_SEC1; i += 2)
@@ -446,14 +477,18 @@ void drawTime() {
   watch.drawPixel(x + 48, 2, 0xff); watch.drawPixel(x + 48, 4, 0xff);
   watch.drawPixel(x + 58, 2, 0xff); watch.drawPixel(x + 58, 4, 0xff);
 
-  // And underline current digit
- if(f & 0x10) watch.drawLine(x + xOffset[dNum], 7, x + xOffset[dNum] + 2, 7, 0xFF);
 
 // 12/24 switch:
 //   if(f & 0x10) watch.drawLine(0, 7, 6, 7, 0xFF);
 
-  if(++f >= 32) f = 0;
 #endif // SLART
+
+  // And underline current digit
+ if(f & 0x10) {
+   watch.drawLine(x + xOffset[dNum], 7, x + xOffset[dNum] + 2, 7, brightness);
+ }
+
+  if(++f >= (WATCH_FPS / 2)) f = 0;
 }
 
 void set() {
