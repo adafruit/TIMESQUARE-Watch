@@ -240,9 +240,11 @@ symbols[] = { // Various sumbols (Y/M/D etc.)
 static uint8_t
   digit[13],
   dNum    = 0, // Current digit # being edited
-  f       = 0; // Frame counter for cursor blink
+  curBlnk = 0, // Frame counter for cursor blink
+  symFade = 0; // Frame counter for symbol fade-out
 static int
-  x       = 0; // Horizontal position of current time/date display
+  curX    = 0, // Current position of date/time display
+  destX   = 0; // Final position of date/time display
 static const uint8_t
 //                   Y   Y . M   M . D   D   H   H : M   M : S   S  24
   xOffset[]     = {  0,  4, 10, 14, 20, 24, 30, 34, 40, 44, 50, 54, 58 },
@@ -252,7 +254,6 @@ static const uint8_t
 void mode_set(uint8_t action) {
 
   DateTime now;
-  int      x2;
   int8_t   dir;
   uint8_t  i, lim, m;
 
@@ -265,8 +266,9 @@ void mode_set(uint8_t action) {
    case ACTION_HOLD_BOTH:
    case ACTION_WAKE:
     // Just arrived -- initialize time-setting mode.
-    dNum = 0;
-    x    = 0;
+    dNum = curBlnk = 0;
+    curX = destX = 0;
+    symFade = sizeof(fade);
     now  = RTC.now();
     loadDigits(now.year() - 2000, DIGIT_YEAR0);
     loadDigits(now.month()      , DIGIT_MON0);
@@ -280,10 +282,27 @@ void mode_set(uint8_t action) {
     break;
 
    case ACTION_TAP_LEFT:
+
+    // Advance to next digit position
+    if(++dNum > DIGIT_24) dNum = DIGIT_YEAR0;
+    destX = -xOffset[dNum] - 1 + 4;
+    if     (destX >   0) destX =   0;
+    else if(destX < -59) destX = -59;
+
+    // When switching to first digit of new section, fade out corresponding symbol
+    if((dNum == DIGIT_YEAR0) || (dNum == DIGIT_MON0) || (dNum == DIGIT_DAY0) ||
+       (dNum == DIGIT_HR0  ) || (dNum == DIGIT_MIN0) || (dNum == DIGIT_SEC0)) {
+      symFade = sizeof(fade);
+     }
+
      break;
   }
 
   drawTime();
+
+  if(curX != destX) curX += (destX > curX) ? 1 : -1; // Update scroll position
+  if(++curBlnk >= (WATCH_FPS / 2)) curBlnk = 0;      // Update cursor blink counter
+  if(symFade > 0) symFade--;                         // Update symbol fade counter
 
   
 #ifdef SLART
@@ -398,8 +417,6 @@ void mode_set(uint8_t action) {
 #endif // SLART
 }
 
-uint8_t foo;
-
 void drawTime() {
   uint8_t  i, brightness;
   uint16_t t;
@@ -409,16 +426,47 @@ void drawTime() {
   brightness = ((t = watch.getTimeout()) < sizeof(fade)) ?
     ((255 * ((uint8_t)pgm_read_byte(&fade[t]) + 1)) >> 8) : 255;
 
-  uint8_t b = (foo < sizeof(fade)) ? ((brightness * ((uint8_t)pgm_read_byte(&fade[foo]) + 1)) >> 8) : brightness;
+  uint8_t b = (symFade < sizeof(fade)) ?
+    ((brightness * ((uint8_t)pgm_read_byte(&fade[symFade]) + 1)) >> 8) : brightness;
 
-  if((dNum == DIGIT_YEAR0) && (foo < sizeof(fade))) {
+  if((dNum == DIGIT_YEAR0) && symFade) {
     // draw fading 'Y'
-    blit(symbols, 17, 5, 0, 0, x+1, 1, 5, 5, b);
+    blit(symbols, 17, 5, 0, 0, curX + xOffset[0] + 1, 1, 5, 5, b);
   } else {
     // draw YY digits
-    blit(odoDigits, 21, 136, 0, digit[i    ] * 8 + 1, x + xOffset[i    ], 1, 3, 5, brightness);
-    blit(odoDigits, 21, 136, 0, digit[i + 1] * 8 + 1, x + xOffset[i + 1], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[0] * 8 + 1, curX + xOffset[0], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[1] * 8 + 1, curX + xOffset[1], 1, 3, 5, brightness);
   }
+
+  if((dNum == DIGIT_MON0) && symFade) {
+    // draw fading 'M'
+    blit(symbols, 17, 5, 5, 0, curX + xOffset[2] + 1, 1, 5, 5, b);
+  } else {
+    // draw YY digits
+    blit(odoDigits, 21, 136, 0, digit[2] * 8 + 1, curX + xOffset[2], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[3] * 8 + 1, curX + xOffset[3], 1, 3, 5, brightness);
+  }
+
+  if((dNum == DIGIT_DAY0) && symFade) {
+    // draw fading 'D'
+    blit(symbols, 17, 5, 11, 0, curX + xOffset[4] + 2, 1, 3, 5, b);
+  } else {
+    // draw YY digits
+    blit(odoDigits, 21, 136, 0, digit[4] * 8 + 1, curX + xOffset[4], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[5] * 8 + 1, curX + xOffset[5], 1, 3, 5, brightness);
+  }
+
+  // Add punctuation
+  watch.drawPixel(curX +  8, 3, brightness);
+  watch.drawPixel(curX + 18, 3, brightness);
+  watch.drawPixel(curX + 38, 2, brightness); watch.drawPixel(curX + 38, 4, brightness);
+  watch.drawPixel(curX + 48, 2, brightness); watch.drawPixel(curX + 48, 4, brightness);
+
+  // And underline current digit
+ if(curBlnk & 0x10) {
+   watch.drawLine(curX + xOffset[dNum], 7, curX + xOffset[dNum] + 2, 7, brightness);
+ }
+
 
 
 #ifdef SLART
@@ -433,7 +481,6 @@ void drawTime() {
   }
 */
 
-  if(foo > 0) foo--;
 
 
 //          if(dNum == DIGIT_YEAR0) {
@@ -472,10 +519,6 @@ void drawTime() {
   }
 
   // Then add punctuation...
-  watch.drawPixel(x +  8, 3, 0xff);
-  watch.drawPixel(x + 18, 3, 0xff);
-  watch.drawPixel(x + 48, 2, 0xff); watch.drawPixel(x + 48, 4, 0xff);
-  watch.drawPixel(x + 58, 2, 0xff); watch.drawPixel(x + 58, 4, 0xff);
 
 
 // 12/24 switch:
@@ -483,12 +526,6 @@ void drawTime() {
 
 #endif // SLART
 
-  // And underline current digit
- if(f & 0x10) {
-   watch.drawLine(x + xOffset[dNum], 7, x + xOffset[dNum] + 2, 7, brightness);
- }
-
-  if(++f >= (WATCH_FPS / 2)) f = 0;
 }
 
 void set() {
