@@ -93,7 +93,7 @@ void loop() {
 // To do: add some higher-level clipping here
 void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h, uint8_t b) {
   int      x, y;
-  uint16_t b1 = (uint16_t)b + 1; // +1 so that >>8 (rther than /255) can be used
+  uint16_t b1 = (uint16_t)b + 1; // +1 so that >>8 (rather than /255) can be used
 
   for(y=0; y<h; y++) {
     for(x=0;x<w;x++) {
