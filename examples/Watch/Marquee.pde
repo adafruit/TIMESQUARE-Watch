@@ -27,7 +27,7 @@ void mode_marquee(uint8_t action) {
   if(action != ACTION_NONE) {
     // Reset sleep timeout on any button action, even
     // if it has no consequences in the current mode.
-    watch.setTimeout(WATCH_FPS * 5);
+    watch.setTimeout(WATCH_FPS * 5 - 16);
     if(action >= ACTION_HOLD_LEFT) {
       // Just arrived here -- reset position, etc.
       x = 8;

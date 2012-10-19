@@ -101,7 +101,7 @@ void Watch::begin() {
   power_timer2_disable();
   power_timer0_disable();
   // Comment out this line to use Serial for debugging, etc.:
-//  power_usart0_disable();
+  power_usart0_disable();
 
   PORTB   = PORTB_OFF; // Turn all rows/columns off
   PORTC   = PORTC_OFF;
@@ -220,6 +220,7 @@ static void sleep(void) {
   // wakeFlag stops clicks from falling through on wake
   // (e.g first click won't advance digit in time-setting mode).
   wakeFlag = true;
+  bAction  = ACTION_WAKE;
 
   // Enable only those peripherals used by the watch code
   power_twi_enable();
@@ -281,8 +282,6 @@ static void sleep(void) {
 // unrolled this (e.g. no array lookups), just needs a bit more TLC.
 ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
 
-// Make this do 1-bit/8-bit magic now
-
   uint8_t *p = (uint8_t *)ptr;
 
   switch(col) {
@@ -331,9 +330,6 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
   TCNT1 = 0;
 }
 
-// bAction is already parsed by the time
-// the release is registered.
-// Could instead have a special flag of some sort
 ISR(INT0_vect) {
 
   uint8_t b = PIND & (_BV(PORTD3) | _BV(PORTD2));
@@ -347,7 +343,7 @@ ISR(INT0_vect) {
       if(wakeFlag == true) {
         // First click (release) on wake does NOT perform corresponding
         // action (e.g. don't advance digit in time-setting mode).
-        bAction  = ACTION_WAKE;
+        bAction  = ACTION_NONE;
         wakeFlag = false;
       } else {
         if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;

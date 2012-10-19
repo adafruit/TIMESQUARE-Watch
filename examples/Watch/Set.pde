@@ -211,7 +211,12 @@ symbols[] = { // Various symbols (Y/M/D etc.)
   0x00,0x00,0xFF,0x00,0xFF,0xFF,0xFF,0x00,0x00,0x00,0xFF,0x00,0x00,0xFF,0x00,0xFF,
   0x00,0xFF,0x00,0x00,0x00,0xFF,0x00,0xFF,0x00,0x00,0xFF,0x00,0x00,0x00,0x00,0xFF,
   0x00,0x00,0xFF,0x00,0x00,0xFF,0x00,0xFF,0x00,0xFF,0x00,0x00,0x00,0xFF,0xFF,0xFF,
-  0xFF,0xFF,0x00,0x00,0xFF,0xFF,0xFF,0x00 };
+  0xFF,0xFF,0x00,0x00,0xFF,0xFF,0xFF,0x00 },
+//                   Y   Y . M   M . D   D   H   H : M   M : S   S  24
+  xOffset[]     = {  0,  4, 10, 14, 20, 24, 30, 34, 40, 44, 50, 54, 58 },
+  xScroll[]     = {  0,  1,  8, 11, 18, 21, 28, 31, 38, 41, 48, 51, 55 },
+  limit[]       = {  9,  9,  1,  9,  3,  9,  2,  9,  5,  9,  5,  9,  1 },
+  daysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
 
 #define DIGIT_YEAR0  0
@@ -236,18 +241,11 @@ static uint8_t
 static int
   curX    = 0, // Current position of date/time display
   destX   = 0; // Final position of date/time display
-static const uint8_t
-//                   Y   Y . M   M . D   D   H   H : M   M : S   S  24
-  xOffset[]     = {  0,  4, 10, 14, 20, 24, 30, 34, 40, 44, 50, 54, 58 },
-  xScroll[]     = {  0,  1,  8, 11, 18, 21, 28, 31, 38, 41, 48, 51, 55 },
-  limit[]       = {  9,  9,  1,  9,  3,  9,  2,  9,  5,  9,  5,  9,  1 },
-  daysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
 void mode_set(uint8_t action) {
 
   DateTime now;
-  int8_t   dir;
-  uint8_t  i, lim, m;
+  uint8_t  i;
 
   // Reset sleep timeout on any button action, even
   // if it has no consequences in the current mode.
@@ -257,6 +255,7 @@ void mode_set(uint8_t action) {
 
    case ACTION_HOLD_BOTH:
    case ACTION_WAKE:
+
     // Just arrived -- initialize time-setting mode.
     dNum = curBlnk = 0;
     curX = destX = 0;
@@ -271,10 +270,8 @@ void mode_set(uint8_t action) {
     break;
 
    case ACTION_TAP_RIGHT:
+
     // Increase digit value, wrap around as appropriate
-
-//void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h, uint8_t b) {
-
     if(dNum == DIGIT_24) {
       for(i=1; i<7; i++) {
         drawTime();
@@ -282,22 +279,24 @@ void mode_set(uint8_t action) {
         watch.swapBuffers();
       }
       h24 = !h24;
+    } else {
+      flip();
     }
-
     break;
 
    case ACTION_TAP_LEFT:
 
     // Advance to next digit position
-    // TBD: When advancing past 12/24, might instead make this go back to time display mode
+    // TBD: When advancing past 12/24, might instead make this go
+    // back to time display mode instead of the year setting.
     if(++dNum > DIGIT_24) dNum = DIGIT_YEAR0;
-    destX = -xScroll[dNum];
+    destX = -pgm_read_byte(&xScroll[dNum]);
 
     // When switching to first digit of new section, fade out corresponding symbol
     if((dNum == DIGIT_YEAR0) || (dNum == DIGIT_MON0) || (dNum == DIGIT_DAY0) ||
        (dNum == DIGIT_HR0  ) || (dNum == DIGIT_MIN0) || (dNum == DIGIT_SEC0)) {
-       symFade = sizeof(fade) + 6;            // Run a few frames at full brightness
-       if(dNum == DIGIT_YEAR0) symFade += 60; // Allow extra time for scrolling
+       symFade = sizeof(fade) + 5;            // Run a few frames at full brightness
+       if(dNum == DIGIT_YEAR0) symFade += 55; // Allow extra time for scrolling
      }
 
      break;
@@ -308,124 +307,96 @@ void mode_set(uint8_t action) {
   if(curX != destX) curX += (destX > curX) ? 1 : -1; // Update scroll position
   if(++curBlnk >= (WATCH_FPS / 2)) curBlnk = 0;      // Update cursor blink counter
   if(symFade > 0) symFade--;                         // Update symbol fade counter
+}
 
-  
-#ifdef SLART
+void flip() {
+  uint8_t i, lower, upper, srcY, destX, m, d;
 
-// This was the tap right code:
-/*
-    switch(submode) {
-     case SUBMODE_TIME:
-     case SUBMODE_DATE:
+  // Most digits have a simple upper limit where they roll over to zero:
+  upper = pgm_read_byte(&limit[dNum]);
+  // But a few have special behaviors in special cases...
 
-      // Animate current digit incrementing (unless digit #2 in a 30-day month)
-// Advancing digits will use special animations now (e.g. 3 to 0)
-      if((dNum != DIGIT_DAY1) || (daysInMonth[digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1] - 1] != 30)) {
-        for(i=0;i<7;i++) {
-          drawTime();
-          blit(odoDigits, 24, 80, i * 3, digit[dNum] * 8, x + xOffset[dNum], 0, 3, 8);
-          watch.swapBuffers();
-        }
+  // For example, month and day counts start at 1; there is no "month zero."
+  // But this is only a concern when the month or day is less than 10.
+  if(((dNum == DIGIT_MON1) || (dNum == DIGIT_DAY1)) && (digit[dNum - 1] == 0)) {
+    lower = 1;
+    // If rolling over from 9 to 1, use special animation
+    // sequence, otherwise use the standard odometer digits:
+    srcY  = (digit[dNum] == upper) ? 120 : digit[dNum] * 8;
+  } else {
+    lower = 0;
+    // In other situations, the upper limit before rollover varies.
+    // e.g. if month >= 10, then the upper limit for the second digit
+    // becomes 2 (rather than 9):
+    if(dNum == DIGIT_MON1) {
+      if(digit[DIGIT_MON0] == 1) upper = 2;
+    } else if(dNum == DIGIT_DAY1) {
+      // Cap most months at 30 or 31 days as appropriate
+      if(digit[DIGIT_DAY0] == 3) {
+        uint8_t m = digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1];
+        upper = pgm_read_byte(&daysInMonth[m - 1]) % 10;
+      // Finally, the dreaded leap year...
+      } else if((digit[DIGIT_DAY0] == 2) && (digit[DIGIT_MON0] == 0) && (digit[DIGIT_MON1] == 1)) {
+        uint8_t y = digit[DIGIT_YEAR0] * 10 + digit[DIGIT_YEAR1];
+        if((y == 0) || (y & 3)) upper = 8; // non-leap year ('00' == 2100, non-leap year)
       }
-
-
-
-      // Advance digit value
-      lim = limit[dNum];
-// No submodes...now have digit stuff
-      if(submode == SUBMODE_TIME) { // Time-setting constraints
-        if((dNum == DIGIT_HR1) && (digit[DIGIT_HR0] == 2)) lim = 3; // Limit hour to 23
-        if(++digit[dNum] > lim) digit[dNum] = 0;
-        if((dNum == DIGIT_HR0) && (digit[DIGIT_HR0] == 2) && (digit[DIGIT_HR1] > 3)) digit[1] = 3;
-      } else { // Date-setting constraints
-        boolean leap;
-        if((dNum == DIGIT_MON1) && (digit[DIGIT_MON0] == 1)) lim = 2; // Limit month to 12
-        leap = !((digit[DIGIT_YEAR0] * 10 + digit[DIGIT_YEAR1]) & 3);
-        m    = digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1] - 1; // Month 0 - 11
-        if(m == 1) { // Feb
-          if(dNum == DIGIT_DAY0) {
-            lim = 2;
-          } else if(dNum == DIGIT_DAY1) {
-            lim = leap ? 9 : 8; // Second digit limit = 8 or 9, depending on leap year
-          }
-        } else {
-          if(digit[DIGIT_DAY0] == 3) { // Second digit limit = 0 or 1, depending on month
-            lim = (daysInMonth[x2] == 31) ? 1 : 0;
-          }
-        }
-        if(++digit[dNum] > lim) {
-          // Month and day can't be zero
-          if(dNum == DIGIT_MON1) {
-            digit[DIGIT_MON1] = (digit[DIGIT_MON0] == 0) ? 1 : 0;
-          } else if(dNum == DIGIT_DAY1) {
-            digit[DIGIT_DAY1] = (digit[DIGIT_DAY0] == 0) ? 1 : 0;
-          } else {
-            digit[dNum] = 0;
-          }
-        }
-        if(dNum == DIGIT_DAY0) {
-          if(digit[DIGIT_MON0] == 2) { // Feb
-            i = leap ? 9 : 8;
-            if(digit[DIGIT_DAY1] > i) digit[DIGIT_DAY1] = i;
-          } else { // Not Feb
-            i = (daysInMonth[m] > 30) ? 1 : 0;
-            if(digit[DIGIT_DAY1] > i) digit[DIGIT_DAY1] = i;
-          }
-        }
-      }
-      break;
-     case SUBMODE_24HR:
-      // Toggle 12/24 hr mode (w/animation)
-      // Will have a special 12/24 bitmap, but for now...
-      for(i=0;i<7;i++) {
-        blit(odoDigits, 24, 80, i * 3,  8, 0, 0, 3, 8);
-        blit(odoDigits, 24, 80, i * 3, 16, 4, 0, 3, 8);
-        watch.swapBuffers();
-      }
-      h24 = !h24;
-      break;
+    } else if(dNum == DIGIT_HR1) {
+      if(digit[DIGIT_HR0] == 2) upper = 3;
     }
-*/
 
-// This was tap left:
+    // In 30-day months, second digit can't roll over to anything
+    if(upper == lower) return;
 
-// New plan: left tap at end of time-setting = go to time display mode
-// (don't cycle back to year)
-/*
-    if(submode == SUBMODE_24HR) {
-      // Toggle 12/24 hr mode (w/animation)
-      // Will have a special 12/24 bitmap, but for now...
-      for(i=0;i<7;i++) {
-        blit(odoDigits, 24, 80, i * 3,  8, 0, 0, 3, 8);
-        blit(odoDigits, 24, 80, i * 3, 16, 4, 0, 3, 8);
-        watch.swapBuffers();
-      }
-      h24 = !h24;
-    } else {
-      // Advance to next digit position
-// As the first digit of a section (year, month, etc.) is reached,
-// show 'Y', 'M' etc. temporarily in that position.
-
-      dNum++;
-      if(submode == SUBMODE_TIME) {
-        if(dNum > DIGIT_SEC1)  dNum = DIGIT_HR0;
-      } else {
-        if(dNum > DIGIT_DAY1) dNum = DIGIT_YEAR0;
-      }
-      x2 = -xOffset[dNum] - 1 + 4;
-      if(x2 > 0) x2 = 0;
-      else if(x2 < -19) x2 = -19;
-      dir = (x2 > x) ? 1 : -1;
-      while(x != x2) {
-        drawTime();
-        watch.swapBuffers();
-        x += dir;
-      }
+    switch(upper) { // Certain rollovers have special animations
+     case 1:  srcY =   80; break;     // 1->0 animation
+     case 2:  srcY =   88; break;     // 2->0
+     case 3:  srcY =   96; break;     // 3->0
+     case 5:  srcY =  104; break;     // 5->0
+     case 8:  srcY =  112; break;     // 8->0
+     default: srcY = digit[dNum] * 8; // Standard 0-9 animation
     }
-  */
+  }
 
+  destX = curX + pgm_read_byte(&xOffset[dNum]);
 
-#endif // SLART
+  // Animate rolling digit.  Static time is drawn
+  // first, then rolling digit is overwritten.
+  for(i=3; i<21; i += 3) {
+    drawTime();
+    blit(odoDigits, 21, 128, i, srcY, destX, 0, 3, 8, 255);
+    watch.swapBuffers();
+  }
+
+  // Increment digit value w/wraparound
+  if(++digit[dNum] > upper) digit[dNum] = lower;
+
+  // After incrementing digit, subsequent digits need to also be
+  // constrained for validity...for example, when changing the
+  // first digit of the month, the second digit needs to be limited
+  // to reality (e.g. 09 jumps to 10, not 19).  Likewise w/day.
+  switch(dNum) {
+   case DIGIT_MON0:
+    if((digit[DIGIT_MON0] == 1) && (digit[DIGIT_MON1] > 2))
+      digit[DIGIT_MON1] = 0;
+    // Lack of break is intentional...all subsequent constraints apply.
+   case DIGIT_MON1:
+    m = digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1];
+    if(m < 1) loadDigits(1, DIGIT_MON0);
+   case DIGIT_DAY0:
+    m     = digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1];
+    d     = digit[DIGIT_DAY0] * 10 + digit[DIGIT_DAY1];
+    upper = pgm_read_byte(&daysInMonth[m - 1]);
+    if(m == 2) { // is February
+      uint8_t y = digit[DIGIT_YEAR0] * 10 + digit[DIGIT_YEAR1];
+      if((y > 0) && !(y & 3)) upper = 29; // is leap year ('00' == 2100, non-leap year)
+    }
+    if(d > upper)  loadDigits(upper, DIGIT_DAY0);
+    else if(d < 1) loadDigits(1, DIGIT_DAY0);
+   case DIGIT_HR0:
+   case DIGIT_HR1:
+    if((digit[DIGIT_HR0] * 10 + digit[DIGIT_HR1]) > 23)
+      loadDigits(23, DIGIT_HR0);
+  }
 }
 
 PROGMEM uint8_t symX[]      = { 0, 5, 14, 9, 5, 19 }, // Starting column # in symbols bitmap
@@ -445,7 +416,7 @@ void drawTime() {
 
   if(symFade) {
     blit(symbols, 24, 5, pgm_read_byte(&symX[dNum / 2]), 0,
-      curX + xOffset[dNum] + pgm_read_byte(&symOffset[dNum / 2]), 1, 5, 5, b);
+      curX + pgm_read_byte(&xOffset[dNum]) + pgm_read_byte(&symOffset[dNum / 2]), 1, 5, 5, b);
   }
  
   for(i=0; i<12; i++) {
@@ -454,12 +425,11 @@ void drawTime() {
       i++;
       continue;
     }
-    blit(odoDigits, 21, 136, 0, digit[i] * 8 + 1, curX + xOffset[i], 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[i] * 8 + 1, curX + pgm_read_byte(&xOffset[i]), 1, 3, 5, brightness);
   }
 
-
   // draw 12/24
-  blit(odo24, 35, 16, 0, h24 ? 8 : 0, curX + xOffset[12], 0, 5, 8, brightness);
+  blit(odo24, 35, 16, 0, h24 ? 8 : 0, curX + pgm_read_byte(&xOffset[12]), 0, 5, 8, brightness);
 
   // Add punctuation
   watch.drawPixel(curX +  8, 3, brightness);
@@ -469,8 +439,8 @@ void drawTime() {
 
   // And underline current digit
   if(curBlnk & 0x10) {
-    watch.drawLine(curX + xOffset[dNum], 7,
-      curX + xOffset[dNum] + ((dNum == DIGIT_24) ? 4 : 2), 7, brightness);
+    watch.drawLine(curX + pgm_read_byte(&xOffset[dNum]), 7,
+      curX + pgm_read_byte(&xOffset[dNum]) + ((dNum == DIGIT_24) ? 4 : 2), 7, brightness);
   }
 }
 
