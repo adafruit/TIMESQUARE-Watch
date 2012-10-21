@@ -135,6 +135,22 @@ void Watch::swapBuffers(boolean copy) {
 // Basic pixel-drawing function for Adafruit_GFX.
 void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
   if((x >= 0) && (y >= 0) && (x < 8) && (y < 8)) {
+
+    switch(rotation) {
+     case 1:
+      swap(x, y);
+      x = WIDTH  - 1 - x;
+      break;
+     case 2:
+      x = WIDTH  - 1 - x;
+      y = HEIGHT - 1 - y;
+      break;
+     case 3:
+      swap(x, y);
+      y = HEIGHT - 1 - y;
+      break;
+    }
+
     uint8_t bmask = rowBitPortB[x],
             cmask = rowBitPortC[x],
             dmask = rowBitPortD[x],
