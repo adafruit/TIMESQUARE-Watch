@@ -219,6 +219,7 @@ static void sleep(void) {
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);
   cli();
   sleep_enable();
+/* Disabled for now; possible cause of flash corruption
   asm volatile(
     "in   %[tmp]  , %[mcucr]\n"
     "ori  %[tmp]  , %[bods_bodse]\n"
@@ -229,6 +230,7 @@ static void sleep(void) {
     [mcucr]      "I"  _SFR_IO_ADDR(MCUCR),
     [bods_bodse] "i"  (_BV(BODS) | _BV(BODSE)),
     [not_bodse]  "i"  (~_BV(BODSE)));
+*/
   sei();
   sleep_cpu();
   // Execution resumes here on wake.
