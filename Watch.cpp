@@ -37,7 +37,7 @@ static const uint8_t
 // anodes and the other cathodes.  So this weird combination of bits sets
 // all rows and columns to their respective 'off' states:
 #define PORTB_OFF B11001010
-#define PORTC_OFF B00110011 // PC4, PC5 are set to enable I2C pinups
+#define PORTC_OFF B00110011 // PC4, PC5 are set to enable I2C pullups
 #define PORTD_OFF B11001100 // PD2, PD3 are set to enable button pullups
 
 // Because the LED matrix ties up so many of the microcontroller's pins,
