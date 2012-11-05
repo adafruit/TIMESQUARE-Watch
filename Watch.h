@@ -13,18 +13,27 @@
 
 #define WATCH_FPS         65 // Approximate refresh frames/sec
 
+// Number of concurrent 'on' LEDs
+#define WATCH_LEDS_1 0
+#define WATCH_LEDS_2 1
+#define WATCH_LEDS_4 2
+#define WATCH_LEDS_8 3
+
 class Watch : public Adafruit_GFX {
 
  public:
 
-  Watch(boolean doubleBuffer=false);
+  Watch(uint8_t nPlanes=8, uint8_t nLEDs=WATCH_LEDS_8,
+    boolean doubleBuffer=false);
 
   void
     begin(void),
     drawPixel(int16_t x, int16_t y, uint16_t c),
     swapBuffers(boolean copy=false),
     delay(uint8_t d),
-    setTimeout(uint16_t t);
+    setTimeout(uint16_t t),
+    setDisplayMode(uint8_t nPlanes=8, uint8_t nLEDs=WATCH_LEDS_8,
+      boolean doubleBuffer=false);
   uint8_t
     action(void),
     *backBuffer(void);

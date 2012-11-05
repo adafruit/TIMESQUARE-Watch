@@ -41,7 +41,7 @@ PROGMEM uint8_t fade[] = {
    0,  1,  1,  2,  4,  5,  8, 10, 13, 17, 22, 27, 32, 39, 46,
   53, 62, 71, 82, 93,105,117,131,146,161,178,196,214,234,255 };
 
-Watch      watch(true); // Use double-buffered animation
+Watch      watch(8, WATCH_LEDS_8, true); // Use double-buffered animation
 RTC_DS1307 RTC;
 uint8_t    mode = MODE_MARQUEE, mode_last = MODE_MARQUEE;
 boolean    h24  = false; // 24-hour display mode
@@ -49,7 +49,7 @@ boolean    h24  = false; // 24-hour display mode
 void setup() {
   DateTime now;
 
-//   Serial.begin(9600); // Only works if serial port enabled in watch library
+//Serial.begin(9600); // Only works if serial port enabled in watch library
   Wire.begin();
   RTC.begin();
 

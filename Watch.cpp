@@ -48,8 +48,11 @@ static const uint8_t
 static uint8_t
   *img[2];                // Pointers to 'front' and 'back' display buffers
 static volatile uint8_t
-  plane    = 7,
-  col      = 7,
+  planes,
+  passes,
+  plane,
+  pass,
+  col,
   *ptr,                   // Current pointer into front buffer
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
@@ -62,19 +65,47 @@ static volatile boolean
 static volatile uint16_t
   timeout = 0;            // Countdown to sleep() (in frames)
 
-// Constructor: pass 'true' to enable double-buffering (default = false).
-Watch::Watch(boolean dbuf) {
-  int bufSize   = 3 * 8 * 8, // 3 bytes/row * 8 rows * 8 planes
+// Constructor
+Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
+  img[0] = NULL;                        // Image memory not yet alloc'd
+  setDisplayMode(nPlanes, nLEDs, dbuf); // Alloc happens here
+  constructor(8, 8);                    // Init Adafruit_GFX (8x8 image)
+}
+
+// might return FPS!
+void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
+
+  // Validate inputs (1-8 planes, 1/2/4/8 LEDs)
+  if(nPlanes > 8)            nPlanes = 8;
+  if(nLEDs   > WATCH_LEDS_8) nLEDs   = WATCH_LEDS_8;
+
+  // Set plane/pass limits and reset counters
+  planes = nPlanes;
+  passes = 1 << (3 - nLEDs);
+  plane  = planes - 1;
+  pass   = passes - 1;
+  col    = 7;
+
+  // Always 3 bytes/row * 8 rows...
+  // then multiply by number of planes and passes for total byte count.
+  int bufSize   = 3 * 8 * planes * passes,
       allocSize = (dbuf == true) ? (bufSize * 2) : bufSize;
+// very wasteful on low-nLED displays...that's by design.
+// this WILL run out of memory in some situations!
+
+  if(img[0] != NULL) free(img[0]);
 
   // Allocate and initialize front image buffer:
   if(NULL == (img[0] = (uint8_t *)malloc(allocSize))) return;
+
+  // Clear image buffer
   ptr = img[0];
   for(uint8_t i=0; i<bufSize;) {
     ptr[i++] = PORTB_OFF;
     ptr[i++] = PORTC_OFF;
     ptr[i++] = PORTD_OFF;
   }
+
   // If double-buffered, copy front image buffer to back
   if(dbuf) {
     img[1] = &img[0][bufSize];
@@ -82,7 +113,6 @@ Watch::Watch(boolean dbuf) {
   } else {
     img[1] = img[0]; // Else both point to the same address
   }
-  constructor(8, 8); // Init Adafruit_GFX
 }
 
 // Initialize PORT registers and enable timer and button interrupts.
@@ -129,7 +159,7 @@ void Watch::swapBuffers(boolean copy) {
   // Swap actually takes place at specific point in interrupt.
   // Set flag to request swap, then wait for change to complete:
   for(swapFlag = true; swapFlag; );
-  if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * 8);
+  if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * planes * passes);
 }
 
 // Basic pixel-drawing function for Adafruit_GFX.
@@ -156,6 +186,10 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
             dmask = rowBitPortD[x],
             c8    = (uint8_t)c,
             *p    = (uint8_t *)&img[1 - frontIdx][y * 3];
+// 'p' will now be offset based on passes...otherwise,
+// no major changes here.
+// Will probably just have a table for each of the
+// nLEDs cases.
     for(uint8_t bit = 1; bit; bit <<= 1) {
       if(c8 & bit) {
         p[0] |=  bmask;
@@ -313,38 +347,42 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
     COLSTART(5, PORTB, 6, 15) COLEND(PORTB, 7, 3)
     COLSTART(6, PORTC, 1, 18) COLEND(PORTB, 3, 1)
     COLSTART(7, PORTB, 1, 21)
-      if(++plane >= 8) { // Advance plane counter
-        plane = 0;       // Back to plane 0
-        if(swapFlag) {       // If requested, swap
-          frontIdx ^= 1;     // buffers on return
-          swapFlag  = false; // to first column
-        }
-        ptr = img[frontIdx];
+      ptr += 24;
+      if(++pass >= passes) {    // Advance pass counter
+        pass = 0;               // Reset back to pass #0
+        if(++plane >= planes) { // Advance plane counter
+          plane = 0;            // Reset back to plane #0
+          if(swapFlag) {        // If requested, swap
+            frontIdx ^= 1;      // buffers on return
+            swapFlag  = false;  // to first column
+          }
+          ptr = img[frontIdx];  // Reset ptr to start of img
 
-        // Think of this as something like a vertical blank period.
-        // Various counters, etc. occur before next frame starts.
+          // Think of this as something like a vertical blank period.
+          // Various counters, etc. occur before next frame starts.
 
-        // Watch for button 'hold' conditions
-        if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
-          if(bCount >= (WATCH_FPS * 2)) { // ~2 second hold
-            if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
-            else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
-            else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
-            bSave = bCount = 0;       // So button release code isn't confused
-          } else bCount++;            // else keep counting...
-        }
+          // Watch for button 'hold' conditions
+          if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
+// FPS will now be variable, based on planes & passes, blargh
+            if(bCount >= (WATCH_FPS * 2)) { // ~2 second hold
+              if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
+              else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
+              else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
+              bSave = bCount = 0;    // So button release code isn't confused
+            } else bCount++;         // else keep counting...
+          }
 
-        if(frames > 0)   frames--;  // Counter for delay() function
-        if(timeout > 0)  timeout--; // Counter for sleep timeout
-        else             sleep();
-
-      } else ptr += 24;
+          if(frames > 0)  frames--;  // Counter for delay() function
+          if(timeout > 0) timeout--; // Counter for sleep timeout
+          else            sleep();
+        } // else not advancing plane #
+      }   // else not advancing pass #
     COLEND(PORTD, 7, 0)
   }
   // Reset Timer0 counter.  This is done so that the LED 'on' time is
   // more precise -- the above plane-advancing conditional logic won't
   // throw the brightness off.  Need consistent time from end of
-  // interrupt to start of next, not uniform start to start interval.
+  // interrupt to start of next, not uniform start-to-start interval.
   TCNT1 = 0;
 }
 
