@@ -13,11 +13,11 @@
 
 #define WATCH_FPS         65 // Approximate refresh frames/sec
 
-// Number of concurrent 'on' LEDs
-#define WATCH_LEDS_1 0
-#define WATCH_LEDS_2 1
-#define WATCH_LEDS_4 2
-#define WATCH_LEDS_8 3
+// Display multiplexing mode; number of concurrent 'on' LEDs
+#define WATCH_LEDS_8 0
+#define WATCH_LEDS_4 1
+#define WATCH_LEDS_2 2
+#define WATCH_LEDS_1 3
 
 class Watch : public Adafruit_GFX {
 

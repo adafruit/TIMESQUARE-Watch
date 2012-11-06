@@ -52,6 +52,7 @@ static volatile uint8_t
   passes,
   plane,
   pass,
+  fmode,
   col,
   *ptr,                   // Current pointer into front buffer
   frontIdx = 0,           // Buffer # being displayed (vs modified)
@@ -77,11 +78,12 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
 
   // Validate inputs (1-8 planes, 1/2/4/8 LEDs)
   if(nPlanes > 8)            nPlanes = 8;
-  if(nLEDs   > WATCH_LEDS_8) nLEDs   = WATCH_LEDS_8;
+  if(nLEDs   > WATCH_LEDS_1) nLEDs   = WATCH_LEDS_1;
 
   // Set plane/pass limits and reset counters
   planes = nPlanes;
-  passes = 1 << (3 - nLEDs);
+  fmode  = nLEDs;
+  passes = 1 << nLEDs;
   plane  = planes - 1;
   pass   = passes - 1;
   col    = 7;
@@ -162,6 +164,12 @@ void Watch::swapBuffers(boolean copy) {
   if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * planes * passes);
 }
 
+PROGMEM uint8_t flarp[4][8] = {
+  { 0,   0,   0,   0,   0,   0,   0,   0 },
+  { 0,  24,   0,  24,   0,  24,   0,  24 },
+  { 0,  48,  24,  72,   0,  48,  24,  72 },
+  { 0,  96,  48, 144,  24, 120,  72, 168 } };
+
 // Basic pixel-drawing function for Adafruit_GFX.
 void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
   if((x >= 0) && (y >= 0) && (x < 8) && (y < 8)) {
@@ -181,16 +189,21 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
       break;
     }
 
+// This seems to go linear top-to-bottom...
+// But I thought the row-strobing code was 'scrambled' ?
+// Nope!  It's top-to-bottom right now.  But that's easily changed.
     uint8_t bmask = rowBitPortB[x],
             cmask = rowBitPortC[x],
             dmask = rowBitPortD[x],
             c8    = (uint8_t)c,
-            *p    = (uint8_t *)&img[1 - frontIdx][y * 3];
-// 'p' will now be offset based on passes...otherwise,
-// no major changes here.
-// Will probably just have a table for each of the
-// nLEDs cases.
-    for(uint8_t bit = 1; bit; bit <<= 1) {
+            *p    = (uint8_t *)&img[1 - frontIdx][y * 3] +
+                    pgm_read_byte(&flarp[fmode][x]);
+
+//    for(uint8_t bit = 1; bit; bit <<= 1) {
+int bit, maxbit;
+uint8_t inc = 24 * passes;
+maxbit = 1 << planes;
+    for(bit = 1; bit < maxbit; bit <<= 1) {
       if(c8 & bit) {
         p[0] |=  bmask;
         p[1] |=  cmask;
@@ -200,7 +213,7 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
         p[1] &= ~cmask;
         p[2] &= ~dmask;
       }
-      p += 24;
+      p += inc;
     }
   }
 }
@@ -293,6 +306,10 @@ static void sleep(void) {
 // time will be LEDMINTIME * 255, total refresh time will be 8X cycle time.
 #define OVERHEAD   53
 #define LEDMINTIME 60
+// Issue: with low-bit-depth displays, mintime needs to incporporate
+// extra cycles to allow for the "7th row" math.  This isn't needed
+// at higher bit depths because of the time doubling.
+//#define LEDMINTIME 300
 // 60 * 255 = 15300, * 8 = 122400, 8M / 122400 = ~65 Hz
 // Because columns are cycled within PWM intervals, the appearance is more
 // like 2X this (~130 Hz), though the actual full frame rate is still ~65.
