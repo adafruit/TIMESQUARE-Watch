@@ -1,17 +1,8 @@
-// from old nap() function:
-//  set_sleep_mode(SLEEP_MODE_EXT_STANDBY);
-//  sleep_mode();
-
-static unsigned char napflag = 0;
-
-void nap(void) {
-  napflag = 1;
-}
-
-// Library for Adafruit 8x8 LED matrix watch.  Displays 8-bit monochrome
-// graphics with one row enabled at any given time, using a fast timer
-// interrupt and bit angle modulation (vs PWM).
-// (C) Adafruit Industries.
+// Library for Adafruit 8x8 LED matrix watch.  (C) Adafruit Industries.
+// Displays 1- to 8-bit monochrome graphics with one row of 8, 4, 2 or 1
+// LED enabled at a time, using a fast timer interrupt and bit angle
+// modulation (vs PWM).  AVR sleep modes are used where possible to
+// conserve power.  Requires Adafruit_GFX library.
 
 #if ARDUINO >= 100
  #include "Arduino.h"
@@ -25,19 +16,80 @@ void nap(void) {
 #include <avr/sleep.h>
 #include "Watch.h"
 
-// Some of this code might be painful to read in that 'row' and 'column'
-// here refer to the hardware pin functions as described in the LED matrix
-// datasheet...but with the matrix installed sideways in the watch for
-// better component placement, these aren't the same as 'row' and 'column'
-// as we usually consider them in computer graphics.  So...the graphics
-// drawing functions use conventional intuitive X/Y coordinates from the
-// top left of the watch display, and the lower-level code takes care of
-// mapping this to the oddly rotated layout of the LED matrix.
+// This code looks insane and requires quite a bit of explanation...
+
+// First, some of this code might be painful to read in that 'row' and
+// 'column' here refer to the hardware pin functions as described in the
+// LED matrix datasheet...but with the matrix installed sideways in the
+// watch for better component placement, these aren't the same as 'row'
+// and 'column' as we usually consider them in computer graphics.  So...
+// the higher-level graphics drawing functions use conventional X/Y
+// coordinates from the top left of the watch display as normally worn,
+// while the lower-level code (most of this library) takes care of mapping
+// this to the native orientation of the LED matrix.
+
+// Maybe more important is memory usage.  This library is the biggest
+// memory hog in the history of memory hogs, but this came about by design
+// rather than negligence.  The primary focus of the entire library is to
+// reduce the PWM interrupt handler to the fewest instructions and the
+// shortest possible interval, permitting smoother screen refresh (less
+// apparent flicker) and more opportunities to put the CPU in a low-power
+// sleep state.  All other considerations take a back seat to getting in
+// and out of that interrupt as quickly as possible.  Period.
+
+// The row and column lines that drive the display are spread across three
+// PORT registers.  Rather than storing a memory-efficient representation
+// of the screen bitmap that's then dismantled in code across the three
+// PORTs on every interrupt call, screen data is instead stored in a format
+// that can be copied directly to the three PORTs...so each 8-pixel, 1-bit
+// column of the display actually consumes three bytes instead of one.  A
+// full 8x8 pixel 1-bit image requires 24 bytes.
+
+// For a multi-bit image (i.e. 'grayscale,' if we disregard the color of
+// the LED matrix), each additional bitplane consumes 24 bytes.  So a
+// 1-bit image is only 24 bytes, but a 4-bit image (16 brightness levels)
+// needs 24x4 or 96 bytes, and an 8-bit image (256 levels) requires 24x8
+// or 192 bytes.
+
+// In the interest of conserving power, we might not always want to run
+// all 8 LEDs of a column simultaneously (especially as we're using a
+// lithium coin cell, where heavy current draw will deplete this with
+// disproportionate speed).  The library can be throttled back to drive
+// 4, 2 or even just 1 LED in a column at a time.  But again, with the
+// interrupt speed taking precedence, this is achieved by storing multiple
+// full 8-LED columns that each have only half the LEDs enabled (because
+// this is faster than masking out bits every single time).  For example,
+// with 4 (rather than 8) LEDs on at a time, there are essentially two
+// copies of image data in RAM -- one with even rows enabled and one with
+// odd rows -- but each still requiring the full 24 bytes of data (times
+// the number of bitplanes).  An 8-bit image displaying 4 LEDs at a time
+// now requires 24x8x2 or 384 bytes for the small 8x8 grid.  2 LEDs at a
+// time requires 4 passes, while 1 LED requires 8 passes.  It becomes
+// necessary to cut back the number of bitplanes as this approaches the
+// total free RAM available on the MCU!  Running more LEDs at a time saves
+// RAM, but draws more power.  The right balance must be found between
+// looking nice and preserving scarce battery power.  Since the application
+// has only modest needs beyond showing a watch face, there's little guilt
+// in sacrificing ridiculous amounts of RAM to meet these goals.
+
+// Finally, double-buffering -- a means of achieving flicker-free animation
+// by maintaining separate on- and off-screen buffers -- doubles the screen
+// memory requirements yet again.
+
+// Screen RAM requirements can thus be calculated as follows:
+// 24 bytes * bitplanes * passes * buffers, where:
+// Brightness levels = 2^bitplanes; e.g. 1 plane = 2 levels, 2 planes = 4...
+// 8 LEDs = 1 pass, 4 LEDs = 2 passes, 2 LEDs = 4 passes, 1 LED = 8 passes.
+// Buffers = 1 (single-buffered) or 2 (double-buffered).
+// e.g. 16-level, 4 LEDs at a time, double buffered = 24*4*2*2 = 384 bytes.
+
+
+
+
 
 // These tables help facilitate pixel drawing.  They are intentionally
 // NOT placed in PROGMEM in order to save a few instruction cycles.
-// There's ample RAM for this as the screen buffer isn't very large
-// (192 bytes single-buffered, 384 bytes double-buffered).  Oink oink!
+// (might change that.  Also might use RTClite library to save RAM)
 static const uint8_t
   rowBitPortB[] = {    0, 0x20,    0, 0x10, 0x04,    0, 0x01,    0},
   rowBitPortC[] = {    0,    0, 0x08,    0,    0, 0x04,    0,    0},
@@ -136,7 +188,6 @@ void Watch::begin() {
   // timing.  Unfortunately this means delay(), millis() won't work,
   // so we have our own methods instead for passing time.
   TIMSK0 = 0;
-  TIMSK1 = 0;
   // Disable peripherals that aren't used by this code,
   // maybe save a tiny bit of power.
   power_adc_disable();
@@ -201,9 +252,6 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
       break;
     }
 
-// This seems to go linear top-to-bottom...
-// But I thought the row-strobing code was 'scrambled' ?
-// Nope!  It's top-to-bottom right now.  But that's easily changed.
     uint8_t bmask = rowBitPortB[x],
             cmask = rowBitPortC[x],
             dmask = rowBitPortD[x],
@@ -257,9 +305,9 @@ uint16_t Watch::getTimeout(void) {
   return timeout;
 }
 
-// Puts watch into extremely low-power state, disabling all peripherals and
-// brownout detection.  Resumes on pin change interrupt (either button).
-// This function is not exposed to the outside world; only the timer
+// Puts watch into extremely low-power state, nearly all peripherals
+// disabled.  Resumes on pin change interrupt (either button).  This
+// function is not exposed to the outside world; only the timer
 // interrupt may invoke it.
 static void sleep(void) {
 
@@ -273,29 +321,23 @@ static void sleep(void) {
   power_timer2_disable();
   power_twi_disable();
 
-  // BOD disable code adapted from Rocket Scream's LowPower library
-  // https://github.com/rocketscream/Low-Power
-// In power-save mode (not power-down), Timer2 is available as
-// a wake-up source.  There's also Extended Standby, which keeps
-// the clock enabled.
+  // VITALLY IMPORTANT: note that BOR (brown-out reset) is NOT disabled,
+  // even though this can save many micro-Amps during power-down sleep.
+  // As the coin cell runs down, brown-outs are actually quite likely.
+  // When this happens, if BOR is disabled, the MCU will behave erratically
+  // and may jump to any random location...and if this leads into any
+  // bootloader code that erases or writes a flash page, the application --
+  // or worse, the bootloader itself -- can become corrupted, leaving no
+  // easy way to re-flash the watch.  This is NOT the unlikely one-in-a-
+  // million chance you might think.  Actual odds seem to be about 1% --
+  // the phenomenon has been observed in the wild and even while developing
+  // this code.  So BOR is left enabled to provide a proper safety net.
+  // Really, do NOT go adding BOR-disabling code, you'll regret it.
+
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);
   sleep_enable();
   sei(); // Keep interrupts enabled during sleep
   sleep_mode();
-
-/* Disabled for now; possible cause of flash corruption
-  asm volatile(
-    "in   %[tmp]  , %[mcucr]\n"
-    "ori  %[tmp]  , %[bods_bodse]\n"
-    "out  %[mcucr], %[tmp]\n"
-    "andi %[tmp]  , %[not_bodse]\n"
-    "out  %[mcucr], %[tmp]" :
-    [tmp]        "=&d"(tmp) :
-    [mcucr]      "I"  _SFR_IO_ADDR(MCUCR),
-    [bods_bodse] "i"  (_BV(BODS) | _BV(BODSE)),
-    [not_bodse]  "i"  (~_BV(BODSE)));
-*/
-
   // Execution resumes here on wake.
 
   // wakeFlag stops clicks from falling through on wake
