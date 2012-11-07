@@ -41,7 +41,7 @@ PROGMEM uint8_t fade[] = {
    0,  1,  1,  2,  4,  5,  8, 10, 13, 17, 22, 27, 32, 39, 46,
   53, 62, 71, 82, 93,105,117,131,146,161,178,196,214,234,255 };
 
-Watch      watch(8, WATCH_LEDS_8, true); // Use double-buffered animation
+Watch      watch(5, WATCH_LEDS_4, true); // Use double-buffered animation
 RTC_DS1307 RTC;
 uint8_t    mode = MODE_MARQUEE, mode_last = MODE_MARQUEE;
 boolean    h24  = false; // 24-hour display mode
@@ -65,6 +65,7 @@ void setup() {
 }
 
 void loop() {
+
   uint8_t a = watch.action();
   if(a == ACTION_HOLD_BOTH) {
     if(mode == MODE_SET) {
@@ -100,7 +101,8 @@ void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, i
   for(y=0; y<h; y++) {
     for(x=0;x<w;x++) {
       watch.drawPixel(dx + x, dy + y,
-        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 8);
+        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 11);
+//        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 8);
     }
   }
 }

@@ -1,13 +1,3 @@
-// from old nap() function:
-//  set_sleep_mode(SLEEP_MODE_EXT_STANDBY);
-//  sleep_mode();
-
-static unsigned char napflag = 0;
-
-void nap(void) {
-  napflag = 1;
-}
-
 // Library for Adafruit 8x8 LED matrix watch.  Displays 8-bit monochrome
 // graphics with one row enabled at any given time, using a fast timer
 // interrupt and bit angle modulation (vs PWM).
@@ -24,6 +14,8 @@ void nap(void) {
 #include <avr/power.h>
 #include <avr/sleep.h>
 #include "Watch.h"
+
+void nap(uint8_t);
 
 // Some of this code might be painful to read in that 'row' and 'column'
 // here refer to the hardware pin functions as described in the LED matrix
@@ -135,14 +127,13 @@ void Watch::begin() {
   // Timer0 interrupt is disabled as this throws off the delicate PWM
   // timing.  Unfortunately this means delay(), millis() won't work,
   // so we have our own methods instead for passing time.
-  TIMSK0 = 0;
-  TIMSK1 = 0;
+  TIMSK0  = 0;
   // Disable peripherals that aren't used by this code,
   // maybe save a tiny bit of power.
   power_adc_disable();
   power_spi_disable();
+//  power_timer2_disable();
   power_timer0_disable();
-  power_timer1_disable();
   // Comment out this line to use Serial for debugging, etc.:
   power_usart0_disable();
 
@@ -153,12 +144,11 @@ void Watch::begin() {
   DDRC    = B00001111;
   DDRD    = B11110000;
 
-  // Set up Timer2 for matrix interrupt.  Mode 2 (CTC), OC2A off, 1/64 prescale
-  TCCR2A  = _BV(WGM21); // Mode 2(CTC), OC2A,2B off
-  TCCR2B  = _BV(CS22);  // 1/64 prescale
-  //TCCR2B  = _BV(CS21) | _BV(CS20);  // 1/32 prescale
-  OCR2A   = 255;
-  TIMSK2 |= _BV(OCIE2A);
+  // Set up Timer1 for matrix interrupt.  Mode 4 (CTC), OC1A off, no prescale.
+  TCCR1A  = 0;
+  TCCR1B  = _BV(WGM12) | _BV(CS10);
+  OCR1A   = 100;
+  TIMSK1 |= _BV(OCIE1A);
 
   // Set up interrupt-on-change for buttons.
   EICRA   = _BV(ISC10)  | _BV(ISC00);  // Trigger on any logic change
@@ -172,7 +162,14 @@ void Watch::begin() {
 void Watch::swapBuffers(boolean copy) {
   // Swap actually takes place at specific point in interrupt.
   // Set flag to request swap, then wait for change to complete:
-  for(swapFlag = true; swapFlag; );
+for(swapFlag = true; swapFlag; ) {
+  if(OCR1A >= 256 ) {
+    nap(OCR1A >> 9);
+    OCR1A >>= 1;
+  }
+}
+
+//  for(swapFlag = true; swapFlag; );
   if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * planes * passes);
 }
 
@@ -270,8 +267,9 @@ static void sleep(void) {
   DDRB  = 0   ; DDRC  = 0   ; DDRD  = 0;
   PORTB = 0xff; PORTC = 0xff; PORTD = 0xff;
 
-  power_timer2_disable();
+  power_timer1_disable();
   power_twi_disable();
+power_timer2_disable();
 
   // BOD disable code adapted from Rocket Scream's LowPower library
   // https://github.com/rocketscream/Low-Power
@@ -279,10 +277,9 @@ static void sleep(void) {
 // a wake-up source.  There's also Extended Standby, which keeps
 // the clock enabled.
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+//  sleep_mode();
+  cli();
   sleep_enable();
-  sei(); // Keep interrupts enabled during sleep
-  sleep_mode();
-
 /* Disabled for now; possible cause of flash corruption
   asm volatile(
     "in   %[tmp]  , %[mcucr]\n"
@@ -295,7 +292,8 @@ static void sleep(void) {
     [bods_bodse] "i"  (_BV(BODS) | _BV(BODSE)),
     [not_bodse]  "i"  (~_BV(BODSE)));
 */
-
+  sei();
+  sleep_cpu();
   // Execution resumes here on wake.
 
   // wakeFlag stops clicks from falling through on wake
@@ -306,7 +304,8 @@ static void sleep(void) {
   // Enable only those peripherals used by the watch code
   power_twi_enable();
   Wire.begin(); // App note recommends reinitializing TWI on wake
-  power_timer2_enable();
+  power_timer1_enable();
+power_timer2_enable();
 
   PORTB = PORTB_OFF; // Turn all rows/columns off
   PORTC = PORTC_OFF;
@@ -316,6 +315,28 @@ static void sleep(void) {
   DDRD  = B11110000;
 }
 
+void nap(uint8_t length) {
+
+  unsigned char tmp;
+
+  // Ports are left unchanged
+
+// timer left enabled in init now
+//  power_timer2_enable();
+  TCNT2   = 0; // Reset counter
+  OCR2A   = length;
+//  TCCR2B  = _BV(CS20);  // No prescale (for now)
+  TCCR2B  = _BV(CS22) | _BV(CS21);  // 256:1 prescale
+  TCCR2A  = _BV(WGM21); // Mode 2(CTC), OC2A,2B off
+  TIMSK2 |= _BV(OCIE2A);
+
+  set_sleep_mode(SLEEP_MODE_EXT_STANDBY);
+  sleep_mode();
+  // Execution resumes here on wake.
+
+  TIMSK2 = 0; // Disable interrupt
+//  power_timer2_disable();
+}
 
 // OVERHEAD is the estimated instruction cycle count for the stack work
 // done entering and exiting the timer interrupt.  LEDMINTIME is the
@@ -370,14 +391,13 @@ static void sleep(void) {
 // can be tightened up, OVERHEAD and LEDMINTIME constants above can be
 // reduced and a a better refresh rate should be possible.  Already
 // unrolled this (e.g. no array lookups), just needs a bit more TLC.
-ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
+ISR(TIMER1_COMPA_vect, ISR_BLOCK) {
 
   uint8_t *p = (uint8_t *)ptr;
 
   switch(col) {
     COLSTART(0, PORTD, 7,  0)
-//      OCR1A = (LEDMINTIME << plane) - OVERHEAD; // Interrupt time for plane
-OCR2A = 255 >> (8 - plane);
+      OCR1A = (LEDMINTIME << plane) - OVERHEAD; // Interrupt time for plane
     COLEND(PORTD, 6, 4)
     COLSTART(1, PORTB, 3,  3) COLEND(PORTB, 6, 5)
     COLSTART(2, PORTC, 0,  6) COLEND(PORTC, 1, 6)
@@ -392,7 +412,6 @@ OCR2A = 255 >> (8 - plane);
         if(++plane >= planes) { // Advance plane counter
           plane = 0;            // Reset back to plane #0
           if(swapFlag) {        // If requested, swap
-// this may throw off the sleep, below
             frontIdx ^= 1;      // buffers on return
             swapFlag  = false;  // to first column
           }
@@ -400,6 +419,10 @@ OCR2A = 255 >> (8 - plane);
 
           // Think of this as something like a vertical blank period.
           // Various counters, etc. occur before next frame starts.
+
+// Is the problem that this is inside the interrupt handler?
+// I think that's it!  Yep! (confirmed)
+//if(OCR1A > 400) nap(100);
 
           // Watch for button 'hold' conditions
           if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
@@ -423,14 +446,7 @@ OCR2A = 255 >> (8 - plane);
   // more precise -- the above plane-advancing conditional logic won't
   // throw the brightness off.  Need consistent time from end of
   // interrupt to start of next, not uniform start-to-start interval.
-//  TCNT1 = 0;
-
-  if(swapFlag && (OCR2A > 4)) {
-    set_sleep_mode(SLEEP_MODE_PWR_SAVE);
-    sleep_enable();
-    sei(); // Keep interrupts enabled during sleep
-    sleep_mode();
-  }
+  TCNT1 = 0;
 }
 
 ISR(INT0_vect) {
@@ -458,4 +474,8 @@ ISR(INT0_vect) {
 }
 
 ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
+
+// Timer2 wake
+ISR(TIMER2_COMPA_vect) {
+}
 

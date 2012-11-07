@@ -11,7 +11,8 @@
 #define ACTION_HOLD_BOTH  5
 #define ACTION_WAKE       6
 
-#define WATCH_FPS         65 // Approximate refresh frames/sec
+//#define WATCH_FPS         65 // Approximate refresh frames/sec
+#define WATCH_FPS 126
 
 // Display multiplexing mode; number of concurrent 'on' LEDs
 #define WATCH_LEDS_8 0

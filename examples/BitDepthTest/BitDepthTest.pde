@@ -5,8 +5,8 @@
 #include <Adafruit_GFX.h>
 #include <Watch.h>
 
-#define PLANES  4
-#define BITMODE WATCH_LEDS_4
+#define PLANES  8
+#define BITMODE WATCH_LEDS_8
 
 // 1, 2 planes does not work.  3+ is OK.
 // Low bitplane counts weren't working because LEDMINTIME was not sufficient
@@ -31,8 +31,8 @@ char str[20];
 uint8_t f = 0;
 
 void loop() {
-  uint8_t a = watch.action();
 
+  uint8_t a = watch.action();
   if(a == ACTION_HOLD_BOTH) {
   } else if(a == ACTION_HOLD_RIGHT) {
   } else if(a == ACTION_HOLD_LEFT) {
@@ -49,10 +49,8 @@ void loop() {
     f = 0;
   }
 
-
-  watch.setTimeout(100);
-
   watch.swapBuffers();
+  watch.setTimeout(100);
 }
 
 // To do: add some higher-level clipping here
