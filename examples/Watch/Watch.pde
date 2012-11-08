@@ -41,15 +41,18 @@ PROGMEM uint8_t fade[] = {
    0,  1,  1,  2,  4,  5,  8, 10, 13, 17, 22, 27, 32, 39, 46,
   53, 62, 71, 82, 93,105,117,131,146,161,178,196,214,234,255 };
 
-Watch      watch(5, WATCH_LEDS_4, true); // Use double-buffered animation
+//Watch      watch(8, LED_PLEX_8, true); // Use double-buffered animation
+Watch      watch(7, LED_PLEX_4, true); // Use double-buffered animation
 RTC_DS1307 RTC;
 uint8_t    mode = MODE_MARQUEE, mode_last = MODE_MARQUEE;
 boolean    h24  = false; // 24-hour display mode
+uint16_t   fps;
 
 void setup() {
   DateTime now;
 
 //Serial.begin(9600); // Only works if serial port enabled in watch library
+
   Wire.begin();
   RTC.begin();
 
@@ -60,7 +63,8 @@ void setup() {
     RTC.adjust(DateTime(__DATE__, __TIME__));
     mode = MODE_SET;
   }
-  watch.setTimeout(WATCH_FPS * 4);
+  fps = watch.getFPS();
+  watch.setTimeout(fps * 4);
   watch.begin();
 }
 
@@ -101,8 +105,9 @@ void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, i
   for(y=0; y<h; y++) {
     for(x=0;x<w;x++) {
       watch.drawPixel(dx + x, dy + y,
-        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 11);
+//        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 11);
 //        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 8);
+        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 9);
     }
   }
 }

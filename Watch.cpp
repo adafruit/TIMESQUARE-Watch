@@ -16,61 +16,71 @@
 #include <avr/sleep.h>
 #include "Watch.h"
 
-// This code looks insane and requires quite a bit of explanation...
+// This code looks ridiculous and requires quite a bit of explanation...
 
-// First, some of this code might be painful to read in that 'row' and
-// 'column' here refer to the hardware pin functions as described in the
-// LED matrix datasheet...but with the matrix installed sideways in the
-// watch for better component placement, these aren't the same as 'row'
-// and 'column' as we usually consider them in computer graphics.  So...
-// the higher-level graphics drawing functions use conventional X/Y
-// coordinates from the top left of the watch display as normally worn,
-// while the lower-level code (most of this library) takes care of mapping
-// this to the native orientation of the LED matrix.
+// First, some parts might be painful to read in that 'row' and 'column'
+// here refer to the hardware pin functions as described in the LED matrix
+// datasheet...but, with the matrix installed sideways in the watch for
+// better component placement, these aren't the same as 'row' and 'column'
+// visually as we usually consider them in computer graphics.  So...the
+// higher-level graphics drawing functions use conventional X/Y coordinates
+// from the top left of the face of the watch as normally worn, while the
+// lower-level code (most of this library) takes care of mapping this to
+// the native orientation of the LED matrix.
 
-// Maybe more important is memory usage.  This library is the biggest
-// memory hog in the history of memory hogs, but this came about by design
-// rather than negligence.  The primary focus of the entire library is to
-// reduce the PWM interrupt handler to the fewest instructions and the
+// Maybe more important is memory usage.  This library is the biggest RAM
+// hog in the history of RAM hogs, but this came about by design rather
+// than negligence.  The primary focus of the entire library is to reduce
+// the matrix-refresh interrupt handler to the fewest instructions and the
 // shortest possible interval, permitting smoother screen refresh (less
 // apparent flicker) and more opportunities to put the CPU in a low-power
 // sleep state.  All other considerations take a back seat to getting in
-// and out of that interrupt as quickly as possible.  Period.
+// and out of that interrupt as quickly as possible.  The shortest route
+// to achieve this is to store a ton of precomputed stuff in RAM.
 
-// The row and column lines that drive the display are spread across three
-// PORT registers.  Rather than storing a memory-efficient representation
-// of the screen bitmap that's then dismantled in code across the three
-// PORTs on every interrupt call, screen data is instead stored in a format
+// The 8x8 LED matrix, like most, is 'multiplexed' to display one row or
+// column at a time (this library does one column at a time...but that's
+// 'column' in the datasheet sense, recall from above that this is 'row'
+// in the visual sense).  The row and column lines that drive the display
+// are spread across three PORT registers.  Rather than store a memory-
+// efficient representation of the screen bitmap (8 bytes for an 8x8, 1-bit
+// image) and then having code rearrange this across the three PORTs on
+// *every single interrupt call*, screen data is instead stored in a format
 // that can be copied directly to the three PORTs...so each 8-pixel, 1-bit
-// column of the display actually consumes three bytes instead of one.  A
-// full 8x8 pixel 1-bit image requires 24 bytes.
+// column of the display actually consumes three bytes of RAM instead of
+// one (quite a few bits go unused).  A full 8x8 pixel 1-bit image thus
+// requires 24 bytes of RAM, not 8 bytes.  Oink oink factor 3.
 
-// For a multi-bit image (i.e. 'grayscale,' if we disregard the color of
-// the LED matrix), each additional bitplane consumes 24 bytes.  So a
-// 1-bit image is only 24 bytes, but a 4-bit image (16 brightness levels)
+// For a multi-bit image (i.e. 'grayscale,' disregarding the color of the
+// LED matrix), each additional bitplane consumes another 24 bytes.  So a
+// 1-bit image is 24 bytes, while a 4-bit image (16 brightness levels)
 // needs 24x4 or 96 bytes, and an 8-bit image (256 levels) requires 24x8
 // or 192 bytes.
 
-// In the interest of conserving power, we might not always want to run
-// all 8 LEDs of a column simultaneously (especially as we're using a
-// lithium coin cell, where heavy current draw will deplete this with
-// disproportionate speed).  The library can be throttled back to drive
-// 4, 2 or even just 1 LED in a column at a time.  But again, with the
-// interrupt speed taking precedence, this is achieved by storing multiple
-// full 8-LED columns that each have only half the LEDs enabled (because
-// this is faster than masking out bits every single time).  For example,
-// with 4 (rather than 8) LEDs on at a time, there are essentially two
-// copies of image data in RAM -- one with even rows enabled and one with
-// odd rows -- but each still requiring the full 24 bytes of data (times
-// the number of bitplanes).  An 8-bit image displaying 4 LEDs at a time
-// now requires 24x8x2 or 384 bytes for the small 8x8 grid.  2 LEDs at a
-// time requires 4 passes, while 1 LED requires 8 passes.  It becomes
-// necessary to cut back the number of bitplanes as this approaches the
-// total free RAM available on the MCU!  Running more LEDs at a time saves
-// RAM, but draws more power.  The right balance must be found between
-// looking nice and preserving scarce battery power.  Since the application
-// has only modest needs beyond showing a watch face, there's little guilt
-// in sacrificing ridiculous amounts of RAM to meet these goals.
+// Because the watch runs off a single lithium coin cell, there's a very
+// real need to conserve power....heavy current draw will deplete the
+// battery with disproportionate speed.  A significant power saving can be
+// achieved by driving fewer than the full 8 LEDs of a column and using
+// broader multiplexing...for example, rather than 8 LEDs x 8 columns, the
+// library can multiplex 4 LEDs x 16 half-columns, 2 LEDs x 32 quarter-
+// columns, or 1 LED x 64 eighth-columns.  But again, with the interrupt
+// speed taking precedence, this is achieved by storing multiple full 8-LED
+// columns that each only have some fraction of the LEDs enabled, because
+// this is faster than masking out bits every single time.  Somewhat
+// counter-intuitively, the fewer LEDs on at a time, the more RAM is spent
+// in this manner.  For example, driving 4 (rather than 8) LEDs at a time,
+// there are essentially two copies of image data in RAM -- one with even
+// rows enabled and one with odd rows -- but each still requiring the full
+// 24 bytes of data (times the number of bitplanes).  An 8-bit image
+// displaying 4 LEDs at a time now requires 24x8x2 or 384 bytes just for
+// this small 8x8 grid.  2 LEDs at a time requires 4 passes, while 1 LED
+// requires 8 passes.  It becomes necessary to cut back the number of
+// bitplanes as this approaches the total free RAM available on the MCU!
+// Running more LEDs at a time saves RAM, but draws more power.  The right
+// balance must be found between looking nice and preserving scarce battery
+// power.  Since the application has only modest needs beyond showing a
+// watch face, there's little guilt in sacrificing ridiculous amounts of
+// RAM to meet these goals.
 
 // Finally, double-buffering -- a means of achieving flicker-free animation
 // by maintaining separate on- and off-screen buffers -- doubles the screen
@@ -79,21 +89,29 @@
 // Screen RAM requirements can thus be calculated as follows:
 // 24 bytes * bitplanes * passes * buffers, where:
 // Brightness levels = 2^bitplanes; e.g. 1 plane = 2 levels, 2 planes = 4...
-// 8 LEDs = 1 pass, 4 LEDs = 2 passes, 2 LEDs = 4 passes, 1 LED = 8 passes.
+// LEDs = 2^(4-passes); e.g. 8 LEDs = 1 pass, 4 LEDs = 2 passes, etc.
 // Buffers = 1 (single-buffered) or 2 (double-buffered).
 // e.g. 16-level, 4 LEDs at a time, double buffered = 24*4*2*2 = 384 bytes.
 
+// The available display RAM has been fixed at 768 bytes.  This allows
+// the following maximum bit depths for various multiplex factors:
+// 8 LED (1 pass), double buf: 8 bits max
+// 4 LED (2 pass), double buf: 8 bits max
+// 2 LED (4 pass), double buf: 4 bits max
+// 1 LED (8 pass), double buf: 2 bits max
 
 
-
-
-// These tables help facilitate pixel drawing.  They are intentionally
-// NOT placed in PROGMEM in order to save a few instruction cycles.
-// (might change that.  Also might use RTClite library to save RAM)
+// These tables help facilitate pixel drawing.
+// Not PROGMEM'd, for speed
 static const uint8_t
-  rowBitPortB[] = {    0, 0x20,    0, 0x10, 0x04,    0, 0x01,    0},
-  rowBitPortC[] = {    0,    0, 0x08,    0,    0, 0x04,    0,    0},
-  rowBitPortD[] = { 0x10,    0,    0,    0,    0,    0,    0, 0x20};
+  rowBitPortB[]    = {    0, 0x20,    0, 0x10, 0x04,    0, 0x01,    0},
+  rowBitPortC[]    = {    0,    0, 0x08,    0,    0, 0x04,    0,    0},
+  rowBitPortD[]    = { 0x10,    0,    0,    0,    0,    0,    0, 0x20},
+  passOffset[4][8] = { { 0,   0,   0,   0,   0,   0,   0,   0 },
+                       { 0,  24,   0,  24,   0,  24,   0,  24 },
+                       { 0,  48,  24,  72,   0,  48,  24,  72 },
+                       { 0,  96,  48, 144,  24, 120,  72, 168 } };
+
 
 // The 'off' state for rows and columns is different because one represents
 // anodes and the other cathodes.  So this weird combination of bits sets
@@ -108,14 +126,19 @@ static const uint8_t
 // the matrix-specific variables and such are simply declared in the code
 // here rather than in private vars.  Keeps the interrupt code simple.
 static uint8_t
+  napThreshold,
+  imgSpace[768],          // RAM devoted to matrix-driving operations
   *img[2];                // Pointers to 'front' and 'back' display buffers
+static uint16_t
+  fps;
 static volatile uint8_t
   planes,
-  passes,
   plane,
+  plex,
+  passes,
   pass,
-  fmode,
   col,
+  swapFlag = 0,
   *ptr,                   // Current pointer into front buffer
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
@@ -123,60 +146,83 @@ static volatile uint8_t
   bAction  = ACTION_NONE, // Last button action
   frames   = 0;           // Counter for delay()
 static volatile boolean
-  swapFlag = false,
   wakeFlag = false;
 static volatile uint16_t
   timeout = 0;            // Countdown to sleep() (in frames)
 
 // Constructor
 Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
-  img[0] = NULL;                        // Image memory not yet alloc'd
-  setDisplayMode(nPlanes, nLEDs, dbuf); // Alloc happens here
-  constructor(8, 8);                    // Init Adafruit_GFX (8x8 image)
+  img[0] = imgSpace;
+  setDisplayMode(nPlanes, nLEDs, dbuf);
+  constructor(8, 8); // Init Adafruit_GFX (8x8 image)
 }
 
-// might return FPS!
 void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
 
-  // Validate inputs (1-8 planes, 1/2/4/8 LEDs)
-  if(nPlanes > 8)            nPlanes = 8;
-  if(nLEDs   > WATCH_LEDS_1) nLEDs   = WATCH_LEDS_1;
+  // If Timer2 interrupt is currently enabled, stop it:
+  uint8_t running = TIMSK2 & _BV(OCIE2A);
+  TIMSK2 &= ~_BV(OCIE2A);
 
-  // Set plane/pass limits and reset counters
+  // Validate inputs (1-8 planes, 1/2/4/8 LEDs)
+  if(nPlanes > 8)          nPlanes = 8;
+  if(nLEDs   > LED_PLEX_1) nLEDs   = LED_PLEX_1;
+
+  // Set plane/pass limits and reset all counters:
   planes = nPlanes;
-  fmode  = nLEDs;
-  passes = 1 << nLEDs;
+  plex   = nLEDs;
+  passes = 1 << plex;
   plane  = planes - 1;
   pass   = passes - 1;
   col    = 7;
 
+  // Set the Timer2 prescaler to a value low enough to reduce flicker
+  // but high enough to allow time for screen drawing, sleep, etc.
+  uint16_t prescale, res = ((1 << planes) - 1) * passes;
+  if     (res >= 192) {
+    prescale     = 64;
+    TCCR2B       = _BV(CS22);
+    napThreshold = 8;
+  } else if(res >=  96) {
+    prescale     = 128;
+    TCCR2B       = _BV(CS22) | _BV(CS20);
+    napThreshold = 4;
+  } else if(res >=  24) {
+    prescale     = 256;
+    TCCR2B       = _BV(CS22) | _BV(CS21);
+    napThreshold = 2;
+  } else {
+    prescale     = 1024;
+    TCCR2B       = _BV(CS22) | _BV(CS21) | _BV(CS20);
+    napThreshold = 0;
+  }
+  fps = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
+
   // Always 3 bytes/row * 8 rows...
-  // then multiply by number of planes and passes for total byte count.
-  int bufSize   = 3 * 8 * planes * passes,
-      allocSize = (dbuf == true) ? (bufSize * 2) : bufSize;
-// very wasteful on low-nLED displays...that's by design.
-// this WILL run out of memory in some situations!
+  // then multiply by number of planes and passes for total byte count:
+  uint16_t bufSize = 3 * 8 * planes * passes;
 
-  if(img[0] != NULL) free(img[0]);
-
-  // Allocate and initialize front image buffer:
-  if(NULL == (img[0] = (uint8_t *)malloc(allocSize))) return;
-
-  // Clear image buffer
+  // Clear front image buffer
   ptr = img[0];
-  for(uint8_t i=0; i<bufSize;) {
+  for(uint16_t i=0; i<bufSize;) {
     ptr[i++] = PORTB_OFF;
     ptr[i++] = PORTC_OFF;
     ptr[i++] = PORTD_OFF;
   }
 
-  // If double-buffered, copy front image buffer to back
+  // If double-buffered, copy front image buffer to back:
   if(dbuf) {
     img[1] = &img[0][bufSize];
     memcpy(img[1], img[0], bufSize);
   } else {
     img[1] = img[0]; // Else both point to the same address
   }
+
+  // Restart Timer2 interrupt if previously enabled:
+  if(running) TIMSK2 |= _BV(OCIE2A);
+}
+
+uint16_t Watch::getFPS(void) {
+  return fps;
 }
 
 // Initialize PORT registers and enable timer and button interrupts.
@@ -194,8 +240,7 @@ void Watch::begin() {
   power_spi_disable();
   power_timer0_disable();
   power_timer1_disable();
-  // Comment out this line to use Serial for debugging, etc.:
-  power_usart0_disable();
+  power_usart0_disable(); // Comment this out if using Serial for debugging
 
   PORTB   = PORTB_OFF; // Turn all rows/columns off
   PORTC   = PORTC_OFF;
@@ -204,34 +249,27 @@ void Watch::begin() {
   DDRC    = B00001111;
   DDRD    = B11110000;
 
-  // Set up Timer2 for matrix interrupt.  Mode 2 (CTC), OC2A off, 1/64 prescale
-  TCCR2A  = _BV(WGM21); // Mode 2(CTC), OC2A,2B off
-  TCCR2B  = _BV(CS22);  // 1/64 prescale
-  //TCCR2B  = _BV(CS21) | _BV(CS20);  // 1/32 prescale
-  OCR2A   = 255;
-  TIMSK2 |= _BV(OCIE2A);
-
   // Set up interrupt-on-change for buttons.
   EICRA   = _BV(ISC10)  | _BV(ISC00);  // Trigger on any logic change
   EIMSK   = _BV(INT1)   | _BV(INT0);   // Enable interrupts on pins
   bSave   = PIND & (_BV(PORTD3) | _BV(PORTD2)); // Get initial button state
 
+  // Set up Timer2 for matrix interrupt.  Mode 2 (CTC), OC2A off, 1/64 prescale
+  TCCR2A  = _BV(WGM21); // Mode 2(CTC), OC2A,2B off
+  // Prescale (TCCR2B) is initialized in setDisplayMode()
+  OCR2A   = 1;
+  TIMSK2 |= _BV(OCIE2A);
+
   sei(); // Enable global interrupts
 }
 
 // For double-buffered animation, call this function to display new data.
-void Watch::swapBuffers(boolean copy) {
+void Watch::swapBuffers(uint8_t frames, boolean copy) {
   // Swap actually takes place at specific point in interrupt.
   // Set flag to request swap, then wait for change to complete:
-  for(swapFlag = true; swapFlag; );
+  for(swapFlag = frames; swapFlag; );
   if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * planes * passes);
 }
-
-PROGMEM uint8_t flarp[4][8] = {
-  { 0,   0,   0,   0,   0,   0,   0,   0 },
-  { 0,  24,   0,  24,   0,  24,   0,  24 },
-  { 0,  48,  24,  72,   0,  48,  24,  72 },
-  { 0,  96,  48, 144,  24, 120,  72, 168 } };
 
 // Basic pixel-drawing function for Adafruit_GFX.
 void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
@@ -257,12 +295,13 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
             dmask = rowBitPortD[x],
             c8    = (uint8_t)c,
             *p    = (uint8_t *)&img[1 - frontIdx][y * 3] +
-                    pgm_read_byte(&flarp[fmode][x]);
+                    passOffset[plex][x];
 
-//    for(uint8_t bit = 1; bit; bit <<= 1) {
 int bit, maxbit;
 uint8_t inc = 24 * passes;
 maxbit = 1 << planes;
+
+//    for(uint8_t bit = 1; bit; bit <<= 1) {
     for(bit = 1; bit < maxbit; bit <<= 1) {
       if(c8 & bit) {
         p[0] |=  bmask;
@@ -275,6 +314,7 @@ maxbit = 1 << planes;
       }
       p += inc;
     }
+
   }
 }
 
@@ -311,8 +351,6 @@ uint16_t Watch::getTimeout(void) {
 // interrupt may invoke it.
 static void sleep(void) {
 
-  unsigned char tmp;
-
   // Set all ports to high-impedance input mode, enable pullups
   // on all pins (seems to use ever-so-slightly less sauce).
   DDRB  = 0   ; DDRC  = 0   ; DDRD  = 0;
@@ -321,18 +359,19 @@ static void sleep(void) {
   power_timer2_disable();
   power_twi_disable();
 
-  // VITALLY IMPORTANT: note that BOR (brown-out reset) is NOT disabled,
-  // even though this can save many micro-Amps during power-down sleep.
-  // As the coin cell runs down, brown-outs are actually quite likely.
-  // When this happens, if BOR is disabled, the MCU will behave erratically
-  // and may jump to any random location...and if this leads into any
-  // bootloader code that erases or writes a flash page, the application --
-  // or worse, the bootloader itself -- can become corrupted, leaving no
-  // easy way to re-flash the watch.  This is NOT the unlikely one-in-a-
-  // million chance you might think.  Actual odds seem to be about 1% --
-  // the phenomenon has been observed in the wild and even while developing
-  // this code.  So BOR is left enabled to provide a proper safety net.
-  // Really, do NOT go adding BOR-disabling code, you'll regret it.
+  // VITALLY IMPORTANT: brown-out reset (BOR) is NOT disabled, even though
+  // this can save many micro-Amps during power-down sleep.  As the coin
+  // cell runs down, real brown-outs are quite likely.  And when this
+  // happens, if BOR is disabled, the MCU will behave erratically and may
+  // jump to any random location...and if this leads into any bootloader
+  // code that erases or writes a flash page, the application -- or much
+  // worse, the bootloader itself -- can become corrupted, leaving no easy
+  // way to re-flash the watch.  This is NOT the unlikely one-in-a-million
+  // chance you might think...actual odds seem to be about 1% -- the
+  // phenomenon has been observed in the wild with other projects and even
+  // while developing this code.  So BOR is left enabled to provide a
+  // proper safety net.  Really, DO NOT go adding BOR-disabling code,
+  // you'll regret it later.  Just don't.  Okay?  Don't.  Thanks.
 
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);
   sleep_enable();
@@ -358,116 +397,97 @@ static void sleep(void) {
   DDRD  = B11110000;
 }
 
+// Matrix-multiplexing interrupt code
 
-// OVERHEAD is the estimated instruction cycle count for the stack work
-// done entering and exiting the timer interrupt.  LEDMINTIME is the
-// shortest LED 'on' time and must be more than OVERHEAD.  Total PWM cycle
-// time will be LEDMINTIME * 255, total refresh time will be 8X cycle time.
-#define OVERHEAD   53
-#define LEDMINTIME 60
-// Issue: with low-bit-depth displays, mintime needs to incporporate
-// extra cycles to allow for the "7th row" math.  This isn't needed
-// at higher bit depths because of the time doubling.
-//#define LEDMINTIME 240
-// 60 * 255 = 15300, * 8 = 122400, 8M / 122400 = ~65 Hz
-// Because columns are cycled within PWM intervals, the appearance is more
-// like 2X this (~130 Hz), though the actual full frame rate is still ~65.
+// Turn prior column off (set appropriate bit on appropriate PORT)
+#define COLOFF(port, bit) \
+    asm volatile("sbi %0,%1\n" :: "I"(_SFR_IO_ADDR(port)), "I"(bit));
 
-// Turn prior column off, then load new row bits on all 3 PORTs
-#define COLSTART(n, port, bit, idx) \
-   case n:                     \
-    asm volatile(              \
-     "sbi %0,%1\n\t"           \
-     "ld  __tmp_reg__,%a2\n\t" \
-     "out %3,__tmp_reg__\n\t"  \
-     "ld  __tmp_reg__,%a4\n\t" \
-     "out %5,__tmp_reg__\n\t"  \
-     "ld  __tmp_reg__,%a6\n\t" \
-     "out %7,__tmp_reg__\n\t"  \
-     ::                        \
-     "I"(_SFR_IO_ADDR(port)),  \
-     "I"(bit),                 \
-     "e"(&p[idx]),             \
-     "I"(_SFR_IO_ADDR(PORTB)), \
-     "e"(&p[idx+1]),           \
-     "I"(_SFR_IO_ADDR(PORTC)), \
-     "e"(&p[idx+2]),           \
-     "I"(_SFR_IO_ADDR(PORTD)));
+// Turn new column on (clear appropriate bit on appropriate PORT) and
+// advance 'col' to the next column value.  Columns advance in a bizarre
+// interleaved order of horizontal lines in order to reduce apparent
+// flicker and make multiplexing artifacts slightly less objectionable.
+#define COLON(idx, port, bit, nxt) \
+    asm volatile(                  \
+     "ld  __tmp_reg__,%a0\n\t"     \
+     "out %1,__tmp_reg__\n\t"      \
+     "ld  __tmp_reg__,%a2\n\t"     \
+     "out %3,__tmp_reg__\n\t"      \
+     "ld  __tmp_reg__,%a4\n\t"     \
+     "out %5,__tmp_reg__\n\t"      \
+     "cbi %6,%7\n"                 \
+     ::                            \
+     "e"(&p[idx]),                 \
+     "I"(_SFR_IO_ADDR(PORTB)),     \
+     "e"(&p[idx+1]),               \
+     "I"(_SFR_IO_ADDR(PORTC)),     \
+     "e"(&p[idx+2]),               \
+     "I"(_SFR_IO_ADDR(PORTD)),     \
+     "I"(_SFR_IO_ADDR(port)),      \
+     "I"(bit));                    \
+    col = nxt;
 
-// Advance 'col' to next column, then enable current column loaded above.
-// Columns advance in a bizarre interleaved order of horizontal lines in
-// order to reduce apparent flicker and to make multiplexing artifacts
-// less objectionable, esp. when scrolling text horizontally.
-#define COLEND(port, bit, nxt) \
-    col = nxt; \
-    asm volatile("cbi %0,%1" :: "I"(_SFR_IO_ADDR(port)), "I"(bit)); \
-    break;
-
-// Might use Timer2 for PWM with 64:1 prescaler
-// because this is close to the MINTIME value
-// 16320 inst in PWM cycle, *8 = 130560 = 61 Hz
-
-// Plan is to eventually make this a 'naked' interrupt w/100% assembly,
-// avr-gcc output looks a little bloaty esp. in the stack work...if this
-// can be tightened up, OVERHEAD and LEDMINTIME constants above can be
-// reduced and a a better refresh rate should be possible.  Already
-// unrolled this (e.g. no array lookups), just needs a bit more TLC.
 ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
 
   uint8_t *p = (uint8_t *)ptr;
 
   switch(col) {
-    COLSTART(0, PORTD, 7,  0)
-//      OCR1A = (LEDMINTIME << plane) - OVERHEAD; // Interrupt time for plane
-OCR2A = 255 >> (8 - plane);
-    COLEND(PORTD, 6, 4)
-    COLSTART(1, PORTB, 3,  3) COLEND(PORTB, 6, 5)
-    COLSTART(2, PORTC, 0,  6) COLEND(PORTC, 1, 6)
-    COLSTART(3, PORTB, 7,  9) COLEND(PORTB, 1, 7)
-    COLSTART(4, PORTD, 6, 12) COLEND(PORTC, 0, 2)
-    COLSTART(5, PORTB, 6, 15) COLEND(PORTB, 7, 3)
-    COLSTART(6, PORTC, 1, 18) COLEND(PORTB, 3, 1)
-    COLSTART(7, PORTB, 1, 21)
-      ptr += 24;
-      if(++pass >= passes) {    // Advance pass counter
-        pass = 0;               // Reset back to pass #0
-        if(++plane >= planes) { // Advance plane counter
-          plane = 0;            // Reset back to plane #0
-          if(swapFlag) {        // If requested, swap
-// this may throw off the sleep, below
-            frontIdx ^= 1;      // buffers on return
-            swapFlag  = false;  // to first column
-          }
-          ptr = img[frontIdx];  // Reset ptr to start of img
+   case 0:  asm("nop; nop;"); COLON( 0, PORTD, 6, 4); break;
+   case 1:  COLOFF(PORTB, 3); COLON( 3, PORTB, 6, 5); break;
+   case 2:  COLOFF(PORTC, 0); COLON( 6, PORTC, 1, 6); break;
+   case 3:  COLOFF(PORTB, 7); COLON( 9, PORTB, 1, 7); break;
+   case 4:  COLOFF(PORTD, 6); COLON(12, PORTC, 0, 2); break;
+   case 5:  COLOFF(PORTB, 6); COLON(15, PORTB, 7, 3); break;
+   case 6:  COLOFF(PORTC, 1); COLON(18, PORTB, 3, 1); break;
+   case 7:  COLOFF(PORTB, 1); COLON(21, PORTD, 7, 8); break;
+   default: COLOFF(PORTD, 7);
 
-          // Think of this as something like a vertical blank period.
-          // Various counters, etc. occur before next frame starts.
+    // There is no physical column #8 on the LED matrix; this is sorcery.
+    // Think of it as something like a vertical blank period between one
+    // frame and the next.  After column #7 is switched off, various
+    // counters, timers, etc. are updated before the next frame starts.
+    // Some attempts were made at handling this in the column 0 or 7
+    // cases, but always ran into issues where the extra time needed here
+    // would throw off the PWM timing.  Handling it during a discrete
+    // 'LEDs off' case avoids a whole lot of uglies.
 
-          // Watch for button 'hold' conditions
-          if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
-// FPS will now be variable, based on planes & passes, blargh
-            if(bCount >= (WATCH_FPS * 2)) { // ~2 second hold
-              if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
-              else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
-              else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
-              bSave = bCount = 0;    // So button release code isn't confused
-            } else bCount++;         // else keep counting...
-          }
+    ptr += 24;
+    if(++pass >= passes) {    // Advance pass counter; last pass reached?
+      pass = 0;               // Reset back to pass #0
+      if(++plane >= planes) { // Advance plane counter; last plane reached?
+        plane = 0;            // Reset back to plane #0
+        if(swapFlag && (--swapFlag == 0)) // If requested, swap buffers
+          frontIdx ^= 1;                  // on return to first column
+        ptr = img[frontIdx];  // Reset ptr to start of img
 
-          if(frames > 0)  frames--;  // Counter for delay() function
-          if(timeout > 0) timeout--; // Counter for sleep timeout
-          else            sleep();
-        } // else not advancing plane #
-      }   // else not advancing pass #
-    COLEND(PORTD, 7, 0)
-  }
-  // Reset Timer0 counter.  This is done so that the LED 'on' time is
-  // more precise -- the above plane-advancing conditional logic won't
-  // throw the brightness off.  Need consistent time from end of
-  // interrupt to start of next, not uniform start-to-start interval.
-//  TCNT1 = 0;
+        // Watch for button 'hold' conditions
+        if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
+          if(bCount >= (fps * 2)) { // ~2 second hold
+            if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
+            else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
+            else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
+            bSave = bCount = 0; // So button release code isn't confused
+          } else bCount++;      // else keep counting...
+        }
 
-  if(swapFlag && (OCR2A > 4)) {
+        if(frames > 0)  frames--;  // Counter for delay() function
+        if(timeout > 0) timeout--; // Counter for sleep timeout
+        else            sleep();   // Timeout reached.  Nap time!
+      } // else last bitplane not reached
+      OCR2A = 255 >> (8 - plane); // Interval for next bitplane
+    } // else last pass not reached for this bitplane
+    col = 0; // Resume at column 0 on next invocation
+    break;
+
+  } // end switch(col)
+
+  // Time permitting, go into power-saving mode; CPU stops but LEDs
+  // remain lit.  This is ONLY done on higher (long duration) bitplanes
+  // and if swapFlag is set -- the latter indicates that the higher-
+  // level application code has finished rendering a frame and does not
+  // need further CPU cycles to itself.
+
+  if(swapFlag && (OCR2A >= napThreshold)) {
     set_sleep_mode(SLEEP_MODE_PWR_SAVE);
     sleep_enable();
     sei(); // Keep interrupts enabled during sleep
@@ -481,7 +501,7 @@ ISR(INT0_vect) {
 
   // Any button press/release will reset timeout to ~4 sec.
   // Mode-specific code can override this based on action.
-  if(timeout < (WATCH_FPS * 4)) timeout = (WATCH_FPS * 4);
+  if(timeout < (fps * 4)) timeout = (fps * 4);
 
   if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
     if((bCount > 4)) {                   // Past debounce threshold?

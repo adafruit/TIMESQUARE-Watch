@@ -249,7 +249,7 @@ void mode_set(uint8_t action) {
 
   // Reset sleep timeout on any button action, even
   // if it has no consequences in the current mode.
-  if(action != ACTION_NONE) watch.setTimeout(WATCH_FPS * 10);
+  if(action != ACTION_NONE) watch.setTimeout(fps * 10);
 
   switch(action) {
 
@@ -305,7 +305,7 @@ void mode_set(uint8_t action) {
   drawTime();
 
   if(curX != destX) curX += (destX > curX) ? 1 : -1; // Update scroll position
-  if(++curBlnk >= (WATCH_FPS / 2)) curBlnk = 0;      // Update cursor blink counter
+  if(++curBlnk >= (fps / 2)) curBlnk = 0;            // Update cursor blink counter
   if(symFade > 0) symFade--;                         // Update symbol fade counter
 }
 
