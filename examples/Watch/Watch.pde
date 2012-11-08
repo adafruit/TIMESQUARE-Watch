@@ -36,16 +36,29 @@ void (*modeFunc[])(uint8_t) = {
 };
 #define N_MODES (sizeof(modeFunc) / sizeof(modeFunc[0]))
 
+#define DIGIT_YEAR0  0
+#define DIGIT_YEAR1  1
+#define DIGIT_MON0   2
+#define DIGIT_MON1   3
+#define DIGIT_DAY0   4
+#define DIGIT_DAY1   5
+#define DIGIT_HR0    6
+#define DIGIT_HR1    7
+#define DIGIT_MIN0   8
+#define DIGIT_MIN1   9
+#define DIGIT_24    10
+uint8_t digit[11];
+int     curX;
+
 // Used by various display modes for smooth fade-out before sleep
 PROGMEM uint8_t fade[] = {
    0,  1,  1,  2,  4,  5,  8, 10, 13, 17, 22, 27, 32, 39, 46,
   53, 62, 71, 82, 93,105,117,131,146,161,178,196,214,234,255 };
 
-//Watch      watch(8, LED_PLEX_8, true); // Use double-buffered animation
-Watch      watch(7, LED_PLEX_4, true); // Use double-buffered animation
+Watch      watch(7, LED_PLEX_4, true); // 7-bit, 4 LED multiplex, double-buffered
 RTC_DS1307 RTC;
-uint8_t    mode = MODE_MARQUEE, mode_last = MODE_MARQUEE;
-boolean    h24  = false; // 24-hour display mode
+uint8_t    mode  = MODE_MARQUEE, mode_last = MODE_MARQUEE, depth = 7;
+boolean    h24   = false; // 24-hour display mode
 uint16_t   fps;
 
 void setup() {
@@ -98,17 +111,15 @@ void loop() {
 }
 
 // To do: add some higher-level clipping here
-// Also, make adjustable for different bit-depths
 void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h, uint8_t b) {
   int      x, y;
-  uint16_t b1 = (uint16_t)b + 1; // +1 so that >>8 (rather than /255) can be used
+  uint16_t b1    = (uint16_t)b + 1; // +1 so shift (rather than divide) can be used
+  uint8_t  shift = 16 - depth;
 
   for(y=0; y<h; y++) {
     for(x=0;x<w;x++) {
       watch.drawPixel(dx + x, dy + y,
-//        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 11);
-//        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 8);
-        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> 9);
+        ((uint8_t)pgm_read_byte(&img[(sy + y) * iw + sx + x]) * b1) >> shift);
     }
   }
 }

@@ -17,50 +17,86 @@ PROGMEM uint8_t marqueeDigits[] = { // 44x6 bitmap
   0x11,0xff,0xff,0x11,0x00,0xff,0xff,0x11,0x00,0xff,0x00,0x00,0x11,0xff,0xff,0x11,
   0x11,0xff,0xff,0x11,0x00,0xff,0x00,0x00 };
 
+#define MARQUEE_SUBMODE_TIME 0
+#define MARQUEE_SUBMODE_DATE 1
+
+static int8_t
+  marqueeSubmode = MARQUEE_SUBMODE_TIME,
+  f              = 0;
+
 void mode_marquee(uint8_t action) {
-  static uint8_t f = 0;
-  static int     x = 8;
-  DateTime       now;
-  int            i, h1, h2, m1, m2, s1, s2, t;
-  uint8_t        b;
+  DateTime now;
+  int      i;
 
   if(action != ACTION_NONE) {
-    // Reset sleep timeout on any button action, even
-    // if it has no consequences in the current mode.
-    watch.setTimeout(fps * 5 - 16);
+
     if(action >= ACTION_HOLD_LEFT) {
-      // Just arrived here -- reset position, etc.
-      x = 8;
-      f = 0;
+      // Just arrived here -- reset position, submode, etc.
+  // set up pwm parameters too
+      marqueeSubmode = MARQUEE_SUBMODE_TIME;
+    } else if(action == ACTION_TAP_LEFT) {
+      if(++marqueeSubmode > MARQUEE_SUBMODE_DATE)
+        marqueeSubmode = MARQUEE_SUBMODE_TIME;
+    } else if(action == ACTION_TAP_RIGHT) {
+      if(--marqueeSubmode < MARQUEE_SUBMODE_TIME)
+        marqueeSubmode = MARQUEE_SUBMODE_DATE;
     }
+
+    // Load time/date digits depending on current submode
+    now = RTC.now();
+    if(marqueeSubmode == MARQUEE_SUBMODE_TIME) {
+      i = now.hour();
+      if((!h24) && (i > 12)) i -= 12;
+      loadDigits(i                , DIGIT_HR0);
+      loadDigits(now.minute()     , DIGIT_MIN0);
+      i = (h24 || (digit[DIGIT_HR0] > 0)) ? 116 : 96;
+    } else {
+      loadDigits(now.year() - 2000, DIGIT_YEAR0);
+      loadDigits(now.month()      , DIGIT_MON0);
+      loadDigits(now.day()        , DIGIT_DAY0);
+      i = 140;
+      if(digit[DIGIT_MON0] > 0) i += 20;
+      if(digit[DIGIT_DAY0] > 0) i += 20;
+    }
+    watch.setTimeout(i); // Sleep after time scrolls off left edge
+
+    curX = 8; // Initialize position off right edge
+    f    = 0;
   }
 
-  now = RTC.now();
-  i   = now.hour();
-  if((!h24) && (i > 12)) i -= 12;
-  h1 = i / 10;
-  h2 = i - (h1 * 10);
-  i  = now.minute();
-  m1 = i / 10;
-  m2 = i - (m1 * 10);
-  i  = now.second();
-  s1 = i / 10;
-  s2 = i - (s1 * 10);
-
   watch.fillScreen(0);
-  b = ((t = watch.getTimeout()) < sizeof(fade)) ? (uint8_t)pgm_read_byte(&fade[t]) : 255;
-  blit(marqueeDigits, 44, 6, h1 * 4, 0, x     , 1, 4, 6, b);
-  blit(marqueeDigits, 44, 6, h2 * 4, 0, x  + 5, 1, 4, 6, b);
-  blit(marqueeDigits, 44, 6, 40    , 0, x + 10, 1, 1, 6, b);
-  blit(marqueeDigits, 44, 6, m1 * 4, 0, x + 12, 1, 4, 6, b);
-  blit(marqueeDigits, 44, 6, m2 * 4, 0, x + 17, 1, 4, 6, b);
-  blit(marqueeDigits, 44, 6, 40    , 0, x + 22, 1, 1, 6, b);
-  blit(marqueeDigits, 44, 6, s1 * 4, 0, x + 24, 1, 4, 6, b);
-  blit(marqueeDigits, 44, 6, s2 * 4, 0, x + 29, 1, 4, 6, b);
+  i = curX;
+  if(marqueeSubmode == MARQUEE_SUBMODE_TIME) {
+    if(h24 || (digit[DIGIT_HR0] > 0)) {
+      // Leading 0 (if any) is displayed only in 24hr mode
+      blit(marqueeDigits, 44, 6, digit[DIGIT_HR0] * 4, 0, i, 1, 4, 6, 255);
+      i += 5;
+    }
+    blit(marqueeDigits, 44, 6, digit[DIGIT_HR1 ] * 4 , 0, i, 1, 4, 6, 255); i += 5;
+    blit(marqueeDigits, 44, 6, 40                    , 0, i, 1, 1, 6, 255); i += 2;
+    blit(marqueeDigits, 44, 6, digit[DIGIT_MIN0] * 4 , 0, i, 1, 4, 6, 255); i += 5;
+    blit(marqueeDigits, 44, 6, digit[DIGIT_MIN1] * 4 , 0, i, 1, 4, 6, 255);
+  } else {
+    if(digit[DIGIT_MON0] > 0) {
+      blit(marqueeDigits, 44, 6, digit[DIGIT_MON0] * 4, 0, i, 1, 4, 6, 255);
+      i += 5;
+    }
+    blit(marqueeDigits, 44, 6, digit[DIGIT_MON1] * 4 , 0, i, 1, 4, 6, 255); i += 5;
+    blit(marqueeDigits, 44, 6, 41                    , 0, i, 1, 3, 6, 255); i += 4;
+    if(digit[DIGIT_DAY0] > 0) {
+      blit(marqueeDigits, 44, 6, digit[DIGIT_DAY0] * 4, 0, i, 1, 4, 6, 255);
+      i += 5;
+    }
+    blit(marqueeDigits, 44, 6, digit[DIGIT_DAY1 ] * 4, 0, i, 1, 4, 6, 255); i += 5;
+    blit(marqueeDigits, 44, 6, 41                    , 0, i, 1, 3, 6, 255); i += 4;
+    blit(marqueeDigits, 44, 6, digit[DIGIT_YEAR0] * 4, 0, i, 1, 4, 6, 255); i += 5;
+    blit(marqueeDigits, 44, 6, digit[DIGIT_YEAR1] * 4, 0, i, 1, 4, 6, 255); i += 5;
+  }
 
-  // Every fourth frame, shift text left 1 pixel
+  // Every fourth frame, shift text left 1 pixel.  X is not reset or wrapped here...
+  // the display timeout will kick in, and X will be set on the next wake operation.
   if(++f >= 4) {
-    if(--x < -32) x = 8;
+    curX--;
     f = 0;
   }
 }

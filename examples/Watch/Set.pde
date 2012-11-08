@@ -212,34 +212,17 @@ symbols[] = { // Various symbols (Y/M/D etc.)
   0x00,0xFF,0x00,0x00,0x00,0xFF,0x00,0xFF,0x00,0x00,0xFF,0x00,0x00,0x00,0x00,0xFF,
   0x00,0x00,0xFF,0x00,0x00,0xFF,0x00,0xFF,0x00,0xFF,0x00,0x00,0x00,0xFF,0xFF,0xFF,
   0xFF,0xFF,0x00,0x00,0xFF,0xFF,0xFF,0x00 },
-//                   Y   Y . M   M . D   D   H   H : M   M : S   S  24
-  xOffset[]     = {  0,  4, 10, 14, 20, 24, 30, 34, 40, 44, 50, 54, 58 },
-  xScroll[]     = {  0,  1,  8, 11, 18, 21, 28, 31, 38, 41, 48, 51, 55 },
-  limit[]       = {  9,  9,  1,  9,  3,  9,  2,  9,  5,  9,  5,  9,  1 },
+//                   Y   Y . M   M . D   D   H   H : M   M : 24
+  xOffset[]     = {  0,  4, 10, 14, 20, 24, 30, 34, 40, 44, 48 },
+  xScroll[]     = {  0,  1,  8, 11, 18, 21, 28, 31, 38, 41, 45 },
+  limit[]       = {  9,  9,  1,  9,  3,  9,  2,  9,  5,  9,  1 },
   daysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
-
-#define DIGIT_YEAR0  0
-#define DIGIT_YEAR1  1
-#define DIGIT_MON0   2
-#define DIGIT_MON1   3
-#define DIGIT_DAY0   4
-#define DIGIT_DAY1   5
-#define DIGIT_HR0    6
-#define DIGIT_HR1    7
-#define DIGIT_MIN0   8
-#define DIGIT_MIN1   9
-#define DIGIT_SEC0  10
-#define DIGIT_SEC1  11
-#define DIGIT_24    12
-
 static uint8_t
-  digit[13],
   dNum    = 0, // Current digit # being edited
   curBlnk = 0, // Frame counter for cursor blink
   symFade = 0; // Frame counter for symbol fade-out
 static int
-  curX    = 0, // Current position of date/time display
   destX   = 0; // Final position of date/time display
 
 void mode_set(uint8_t action) {
@@ -257,6 +240,16 @@ void mode_set(uint8_t action) {
    case ACTION_WAKE:
 
     // Just arrived -- initialize time-setting mode.
+
+// A lot of time (relatively) will be spent in time-setting
+// mode, so it's set to the most multiplexed mode (1 LED at
+// a time) to conserve power.  This allows 2 color bits max.
+// ToDo: this is screwing up the button hold case -- can't
+// exit time setting mode if depth changes.  Buh?
+//watch.setDisplayMode(2, LED_PLEX_1, true);
+//fps   = watch.getFPS();
+//depth = 2;
+
     dNum = curBlnk = 0;
     curX = destX = 0;
     symFade = sizeof(fade);
@@ -266,7 +259,6 @@ void mode_set(uint8_t action) {
     loadDigits(now.day()        , DIGIT_DAY0);
     loadDigits(now.hour()       , DIGIT_HR0);
     loadDigits(now.minute()     , DIGIT_MIN0);
-    loadDigits(now.second()     , DIGIT_SEC0);
     break;
 
    case ACTION_TAP_RIGHT:
@@ -294,9 +286,9 @@ void mode_set(uint8_t action) {
 
     // When switching to first digit of new section, fade out corresponding symbol
     if((dNum == DIGIT_YEAR0) || (dNum == DIGIT_MON0) || (dNum == DIGIT_DAY0) ||
-       (dNum == DIGIT_HR0  ) || (dNum == DIGIT_MIN0) || (dNum == DIGIT_SEC0)) {
+       (dNum == DIGIT_HR0  ) || (dNum == DIGIT_MIN0)) {
        symFade = sizeof(fade) + 5;            // Run a few frames at full brightness
-       if(dNum == DIGIT_YEAR0) symFade += 55; // Allow extra time for scrolling
+       if(dNum == DIGIT_YEAR0) symFade += 48; // Allow extra time for scrolling
      }
 
      break;
@@ -419,7 +411,7 @@ void drawTime() {
       curX + pgm_read_byte(&xOffset[dNum]) + pgm_read_byte(&symOffset[dNum / 2]), 1, 5, 5, b);
   }
  
-  for(i=0; i<12; i++) {
+  for(i=DIGIT_YEAR0; i<DIGIT_24; i++) {
     // either skip or overwrite 'symfade' digits
     if(symFade && (i == dNum)) {
       i++;
@@ -429,13 +421,13 @@ void drawTime() {
   }
 
   // draw 12/24
-  blit(odo24, 35, 16, 0, h24 ? 8 : 0, curX + pgm_read_byte(&xOffset[12]), 0, 5, 8, brightness);
+  blit(odo24, 35, 16, 0, h24 ? 8 : 0, curX + pgm_read_byte(&xOffset[10]), 0, 5, 8, brightness);
 
   // Add punctuation
+  brightness >>= (8 - depth); // Change blit opacity to pixel value
   watch.drawPixel(curX +  8, 3, brightness);
   watch.drawPixel(curX + 18, 3, brightness);
   watch.drawPixel(curX + 38, 2, brightness); watch.drawPixel(curX + 38, 4, brightness);
-  watch.drawPixel(curX + 48, 2, brightness); watch.drawPixel(curX + 48, 4, brightness);
 
   // And underline current digit
   if(curBlnk & 0x10) {
@@ -451,7 +443,7 @@ void set() {
     digit[DIGIT_DAY0  ] * 10 + digit[DIGIT_DAY1 ],
     digit[DIGIT_HR0   ] * 10 + digit[DIGIT_HR1  ],
     digit[DIGIT_MIN0  ] * 10 + digit[DIGIT_MIN1 ],
-    digit[DIGIT_SEC0  ] * 10 + digit[DIGIT_SEC1 ]);
+    0); // Seconds are always reset to 0 when exiting time set
   RTC.adjust(dt);
 }
 

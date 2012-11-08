@@ -117,7 +117,8 @@ static uint8_t
   imgSpace[768],          // RAM devoted to matrix-driving operations
   *img[2];                // Pointers to 'front' and 'back' display buffers
 static uint16_t
-  fps;
+  fps,                    // Estimated frames-per-second
+  bufSize;                // Size of display buffer, in bytes
 static volatile uint8_t
   planes,                 // Number of bitplanes
   plane,                  // Current bitplane being displayed
@@ -130,7 +131,7 @@ static volatile uint8_t
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
   bCount   = 0,           // Button hold counter
-  bAction  = ACTION_NONE, // Last button action
+  bAction  = ACTION_WAKE, // Last button action
   frames   = 0;           // Counter for delay()
 static volatile boolean
   wakeFlag = false;
@@ -158,9 +159,9 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
   planes = nPlanes;
   plex   = nLEDs;
   passes = 1 << plex;
-  plane  = planes - 1;
-  pass   = passes - 1;
-  col    = 7;
+  plane  = planes - 1; // plane and pass are set to the max values
+  pass   = passes - 1; // so they'll 'wrap' on the next interrupt.
+  col    = 8;          // Likewise, will roll over to start.
 
   // Set the Timer2 prescaler to a value low enough to reduce flicker
   // but high enough to allow free cycles for screen drawing, sleep, etc.
@@ -186,7 +187,7 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
 
   // Always 3 bytes/row * 8 rows...
   // then multiply by number of planes and passes for total byte count:
-  uint16_t bufSize = 3 * 8 * planes * passes;
+  bufSize = 3 * 8 * planes * passes;
 
   // Clear front image buffer
   ptr = img[0];
@@ -251,7 +252,7 @@ void Watch::swapBuffers(uint8_t frames, boolean copy) {
   // Swap actually takes place at specific point in interrupt.
   // Set flag to request swap, then wait for change to complete:
   for(swapFlag = frames; swapFlag; );
-  if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * planes * passes);
+  if(copy) memcpy(img[1 - frontIdx], img[frontIdx], bufSize);
 }
 
 // These tables help facilitate pixel drawing.  They're intentionally
