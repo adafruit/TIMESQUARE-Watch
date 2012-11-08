@@ -100,19 +100,6 @@
 // 2 LED (4 pass), double buf: 4 bits max
 // 1 LED (8 pass), double buf: 2 bits max
 
-
-// These tables help facilitate pixel drawing.
-// Not PROGMEM'd, for speed
-static const uint8_t
-  rowBitPortB[]    = {    0, 0x20,    0, 0x10, 0x04,    0, 0x01,    0},
-  rowBitPortC[]    = {    0,    0, 0x08,    0,    0, 0x04,    0,    0},
-  rowBitPortD[]    = { 0x10,    0,    0,    0,    0,    0,    0, 0x20},
-  passOffset[4][8] = { { 0,   0,   0,   0,   0,   0,   0,   0 },
-                       { 0,  24,   0,  24,   0,  24,   0,  24 },
-                       { 0,  48,  24,  72,   0,  48,  24,  72 },
-                       { 0,  96,  48, 144,  24, 120,  72, 168 } };
-
-
 // The 'off' state for rows and columns is different because one represents
 // anodes and the other cathodes.  So this weird combination of bits sets
 // all rows and columns to their respective 'off' states:
@@ -126,19 +113,19 @@ static const uint8_t
 // the matrix-specific variables and such are simply declared in the code
 // here rather than in private vars.  Keeps the interrupt code simple.
 static uint8_t
-  napThreshold,
+  napThreshold,           // If OCR2A >= this, OK for power-saving mode
   imgSpace[768],          // RAM devoted to matrix-driving operations
   *img[2];                // Pointers to 'front' and 'back' display buffers
 static uint16_t
   fps;
 static volatile uint8_t
-  planes,
-  plane,
-  plex,
-  passes,
-  pass,
-  col,
-  swapFlag = 0,
+  planes,                 // Number of bitplanes
+  plane,                  // Current bitplane being displayed
+  plex,                   // LED multiplex factor (LED_PLEX_* in .h)
+  passes,                 // Number of matrix passes for multiplexing
+  pass,                   // Current matrix pass being displayed
+  col,                    // Current column being displayed
+  swapFlag = 0,           // If set, swap front/back buffers
   *ptr,                   // Current pointer into front buffer
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
@@ -176,7 +163,7 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
   col    = 7;
 
   // Set the Timer2 prescaler to a value low enough to reduce flicker
-  // but high enough to allow time for screen drawing, sleep, etc.
+  // but high enough to allow free cycles for screen drawing, sleep, etc.
   uint16_t prescale, res = ((1 << planes) - 1) * passes;
   if     (res >= 192) {
     prescale     = 64;
@@ -219,10 +206,6 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
 
   // Restart Timer2 interrupt if previously enabled:
   if(running) TIMSK2 |= _BV(OCIE2A);
-}
-
-uint16_t Watch::getFPS(void) {
-  return fps;
 }
 
 // Initialize PORT registers and enable timer and button interrupts.
@@ -271,58 +254,63 @@ void Watch::swapBuffers(uint8_t frames, boolean copy) {
   if(copy) memcpy(img[1 - frontIdx], img[frontIdx], 3 * 8 * planes * passes);
 }
 
+// These tables help facilitate pixel drawing.  They're intentionally
+// NOT placed in PROGMEM in order to save a few instruction cycles.
+static const uint8_t
+  rowBitPortB[]    = {    0, 0x20,    0, 0x10, 0x04,    0, 0x01,    0},
+  rowBitPortC[]    = {    0,    0, 0x08,    0,    0, 0x04,    0,    0},
+  rowBitPortD[]    = { 0x10,    0,    0,    0,    0,    0,    0, 0x20},
+  passOffset[4][8] = { { 0,   0,   0,   0,   0,   0,   0,   0 },
+                       { 0,  24,   0,  24,   0,  24,   0,  24 },
+                       { 0,  48,  24,  72,   0,  48,  24,  72 },
+                       { 0,  96,  48, 144,  24, 120,  72, 168 } };
+
 // Basic pixel-drawing function for Adafruit_GFX.
 void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
-  if((x >= 0) && (y >= 0) && (x < 8) && (y < 8)) {
 
-    switch(rotation) {
-     case 1:
-      swap(x, y);
-      x = WIDTH  - 1 - x;
-      break;
-     case 2:
-      x = WIDTH  - 1 - x;
-      y = HEIGHT - 1 - y;
-      break;
-     case 3:
-      swap(x, y);
-      y = HEIGHT - 1 - y;
-      break;
+  if((x < 0) || (y < 0) || (x > 7) || (y > 7)) return; // Clip
+
+  switch(rotation) {
+   case 1:
+    swap(x, y);
+    x = WIDTH  - 1 - x;
+    break;
+   case 2:
+    x = WIDTH  - 1 - x;
+    y = HEIGHT - 1 - y;
+    break;
+   case 3:
+    swap(x, y);
+    y = HEIGHT - 1 - y;
+    break;
+  }
+
+  uint8_t bmask = rowBitPortB[x],
+          cmask = rowBitPortC[x],
+          dmask = rowBitPortD[x],
+          c8    = (uint8_t)c,
+          *p    = (uint8_t *)&img[1 - frontIdx][y * 3] +
+                  passOffset[plex][x],
+          bit,
+          inc   = (passes << 4) + (passes << 3), // passes * 24
+          done  = 1 << planes; // Will be 0 in 8-bit case, is normal
+
+  for(bit = 1; bit != done; bit <<= 1, p += inc) {
+    if(c8 & bit) {
+      p[0] |=  bmask;
+      p[1] |=  cmask;
+      p[2] |=  dmask;
+    } else {
+      p[0] &= ~bmask;
+      p[1] &= ~cmask;
+      p[2] &= ~dmask;
     }
-
-    uint8_t bmask = rowBitPortB[x],
-            cmask = rowBitPortC[x],
-            dmask = rowBitPortD[x],
-            c8    = (uint8_t)c,
-            *p    = (uint8_t *)&img[1 - frontIdx][y * 3] +
-                    passOffset[plex][x];
-
-int bit, maxbit;
-uint8_t inc = 24 * passes;
-maxbit = 1 << planes;
-
-//    for(uint8_t bit = 1; bit; bit <<= 1) {
-    for(bit = 1; bit < maxbit; bit <<= 1) {
-      if(c8 & bit) {
-        p[0] |=  bmask;
-        p[1] |=  cmask;
-        p[2] |=  dmask;
-      } else {
-        p[0] &= ~bmask;
-        p[1] &= ~cmask;
-        p[2] &= ~dmask;
-      }
-      p += inc;
-    }
-
   }
 }
 
 // Because Timer0 is disabled (throws off LED brightness), our own delay
 // function is provided.  Unlike normal Arduino delay(), the units here
-// are NOT milliseconds, but frames.  As noted below, one frame is about
-// 1/65 second(ish).  Second parameter is a bitmask of actions that will
-// abort the current delay operation (or 0 if no abort option).
+// are NOT milliseconds, but frames.
 void Watch::delay(uint8_t f) {
   for(frames = f; frames; );
 }
@@ -395,6 +383,10 @@ static void sleep(void) {
   DDRB  = B11111111; // And enable outputs
   DDRC  = B00001111;
   DDRD  = B11110000;
+}
+
+uint16_t Watch::getFPS(void) {
+  return fps;
 }
 
 // Matrix-multiplexing interrupt code
