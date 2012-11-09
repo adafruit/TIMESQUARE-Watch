@@ -230,66 +230,61 @@ void mode_set(uint8_t action) {
   DateTime now;
   uint8_t  i;
 
-  // Reset sleep timeout on any button action, even
-  // if it has no consequences in the current mode.
-  if(action != ACTION_NONE) watch.setTimeout(fps * 10);
+  if(action != ACTION_NONE) {
+    if(action >= ACTION_HOLD_BOTH) {
+      // Just arrived -- initialize time-setting mode.
+      // A relatively large amount of time will be spent in this
+      // mode, so it's set to the most multiplexed mode (1 LED at
+      // a time) to conserve power.  This allows 2 color bits max.
+      watch.setDisplayMode(2, LED_PLEX_1, true);
+      fps   = watch.getFPS();
+      depth = 2;
 
-  switch(action) {
-
-   case ACTION_HOLD_BOTH:
-   case ACTION_WAKE:
-
-    // Just arrived -- initialize time-setting mode.
-
-// A lot of time (relatively) will be spent in time-setting
-// mode, so it's set to the most multiplexed mode (1 LED at
-// a time) to conserve power.  This allows 2 color bits max.
-watch.setDisplayMode(2, LED_PLEX_1, true);
-fps   = watch.getFPS();
-depth = 2;
-watch.setTimeout(fps * 10);
-    dNum = curBlnk = 0;
-    curX = destX = 0;
-    symFade = sizeof(fade);
-    now  = RTC.now();
-    loadDigits(now.year() - 2000, DIGIT_YEAR0);
-    loadDigits(now.month()      , DIGIT_MON0);
-    loadDigits(now.day()        , DIGIT_DAY0);
-    loadDigits(now.hour()       , DIGIT_HR0);
-    loadDigits(now.minute()     , DIGIT_MIN0);
-    break;
-
-   case ACTION_TAP_RIGHT:
-
-    // Increase digit value, wrap around as appropriate
-    if(dNum == DIGIT_24) {
-      for(i=1; i<7; i++) {
-        drawTime();
-        blit(odo24, 35, 16, i * 5, 0, 3, 0, 5, 8, 255);
-        watch.swapBuffers();
-      }
-      h24 = !h24;
-    } else {
-      flip();
+      // Load up initial clock state
+      dNum = curBlnk = 0;
+      curX = destX = 0;
+      symFade = sizeof(fade);
+      now  = RTC.now();
+      loadDigits(now.year() - 2000, DIGIT_YEAR0);
+      loadDigits(now.month()      , DIGIT_MON0);
+      loadDigits(now.day()        , DIGIT_DAY0);
+      loadDigits(now.hour()       , DIGIT_HR0);
+      loadDigits(now.minute()     , DIGIT_MIN0);
     }
-    break;
 
-   case ACTION_TAP_LEFT:
+    // Reset sleep timeout on any button action
+    watch.setTimeout(fps * 10);
 
-    // Advance to next digit position
-    // TBD: When advancing past 12/24, might instead make this go
-    // back to time display mode instead of the year setting.
-    if(++dNum > DIGIT_24) dNum = DIGIT_YEAR0;
-    destX = -pgm_read_byte(&xScroll[dNum]);
+    if(action == ACTION_TAP_RIGHT) {
 
-    // When switching to first digit of new section, fade out corresponding symbol
-    if((dNum == DIGIT_YEAR0) || (dNum == DIGIT_MON0) || (dNum == DIGIT_DAY0) ||
-       (dNum == DIGIT_HR0  ) || (dNum == DIGIT_MIN0)) {
-       symFade = sizeof(fade) + 5;            // Run a few frames at full brightness
-       if(dNum == DIGIT_YEAR0) symFade += 48; // Allow extra time for scrolling
-     }
+      // Increase digit value, wrap around as appropriate
+      if(dNum == DIGIT_24) {
+        for(i=1; i<7; i++) {
+          drawTime();
+          blit(odo24, 35, 16, i * 5, 0, 3, 0, 5, 8, 255);
+          watch.swapBuffers();
+        }
+        h24 = !h24;
+      } else {
+        flip();
+      }
 
-     break;
+    } else if(action == ACTION_TAP_LEFT) {
+
+      // Advance to next digit position
+      // TBD: When advancing past 12/24, might instead make this go
+      // back to time display mode instead of the year setting.
+      if(++dNum > DIGIT_24) dNum = DIGIT_YEAR0;
+      destX = -pgm_read_byte(&xScroll[dNum]);
+  
+      // When switching to first digit of new section, fade out corresponding symbol
+      if((dNum == DIGIT_YEAR0) || (dNum == DIGIT_MON0) || (dNum == DIGIT_DAY0) ||
+         (dNum == DIGIT_HR0  ) || (dNum == DIGIT_MIN0)) {
+         symFade = sizeof(fade) + 5;            // Run a few frames at full brightness
+         if(dNum == DIGIT_YEAR0) symFade += 48; // Allow extra time for scrolling
+       }
+
+    }
   }
 
   drawTime();
@@ -409,7 +404,7 @@ void drawTime() {
       curX + pgm_read_byte(&xOffset[dNum]) + pgm_read_byte(&symOffset[dNum / 2]), 1, 5, 5, b);
   }
  
-  for(i=DIGIT_YEAR0; i<DIGIT_24; i++) {
+  for(i=DIGIT_YEAR0; i<=DIGIT_MIN1; i++) {
     // either skip or overwrite 'symfade' digits
     if(symFade && (i == dNum)) {
       i++;

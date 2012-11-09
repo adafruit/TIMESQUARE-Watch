@@ -113,17 +113,17 @@
 // the matrix-specific variables and such are simply declared in the code
 // here rather than in private vars.  Keeps the interrupt code simple.
 static uint8_t
-  napThreshold,           // If OCR2A >= this, OK for power-saving mode
   imgSpace[768],          // RAM devoted to matrix-driving operations
-  *img[2];                // Pointers to 'front' and 'back' display buffers
+  *img[2],                // Pointers to 'front' and 'back' display buffers
+  planes,                 // Number of bitplanes
+  passes,                 // Number of matrix passes for multiplexing
+  plex,                   // LED multiplex factor (LED_PLEX_* in .h)
+  napThreshold;           // If OCR2A >= this, OK for power-saving mode
 static uint16_t
   fps,                    // Estimated frames-per-second
   bufSize;                // Size of display buffer, in bytes
 static volatile uint8_t
-  planes,                 // Number of bitplanes
   plane,                  // Current bitplane being displayed
-  plex,                   // LED multiplex factor (LED_PLEX_* in .h)
-  passes,                 // Number of matrix passes for multiplexing
   pass,                   // Current matrix pass being displayed
   col,                    // Current column being displayed
   swapFlag = 0,           // If set, swap front/back buffers
@@ -136,7 +136,7 @@ static volatile boolean
   wakeFlag = false;
 static volatile uint16_t
   bCount   = 0,           // Button hold counter
-  timeout  = 0;            // Countdown to sleep() (in frames)
+  timeout  = 10;          // Countdown to sleep() (in frames)
 
 // Constructor
 Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
@@ -149,9 +149,12 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
 
   // If Timer2 interrupt is currently enabled, stop it:
   uint8_t running = TIMSK2 & _BV(OCIE2A);
+  TCCR2B  = 0;
   TIMSK2 &= ~_BV(OCIE2A);
 
-  // Validate inputs (1-8 planes, 1/2/4/8 LEDs)
+  // Validate inputs (1-8 planes, 1/2/4/8 LEDs).  This checks for limits
+  // on the individual parameters but currently does not look for illegal
+  // combinations (those that would exceed imageSpace[]).
   if(nPlanes > 8)          nPlanes = 8;
   if(nLEDs   > LED_PLEX_1) nLEDs   = LED_PLEX_1;
 
@@ -162,26 +165,28 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
   plane  = planes - 1; // plane and pass are set to the max values
   pass   = passes - 1; // so they'll 'wrap' on the next interrupt.
   col    = 8;          // Likewise, will roll over to start.
+  TCNT2  = 0;
+  OCR2A  = 1;
 
   // Set the Timer2 prescaler to a value low enough to reduce flicker
   // but high enough to allow free cycles for screen drawing, sleep, etc.
   uint16_t prescale, res = ((1 << planes) - 1) * passes;
-  if     (res >= 192) {
+  if       (res >= 192) {
     prescale     = 64;
     TCCR2B       = _BV(CS22);
-    napThreshold = 8;
+    napThreshold = 16;
   } else if(res >=  96) {
     prescale     = 128;
     TCCR2B       = _BV(CS22) | _BV(CS20);
-    napThreshold = 4;
+    napThreshold = 8;
   } else if(res >=  24) {
     prescale     = 256;
     TCCR2B       = _BV(CS22) | _BV(CS21);
-    napThreshold = 2;
+    napThreshold = 8;
   } else {
     prescale     = 1024;
     TCCR2B       = _BV(CS22) | _BV(CS21) | _BV(CS20);
-    napThreshold = 0;
+    napThreshold = 1;
   }
   fps = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
 
@@ -207,7 +212,6 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
   }
 
   // Restart Timer2 interrupt if previously enabled:
-  TCNT2 = 0;
   if(running) TIMSK2 |= _BV(OCIE2A);
 }
 
@@ -243,7 +247,6 @@ void Watch::begin() {
   // Set up Timer2 for matrix interrupt.  Mode 2 (CTC), OC2A off, 1/64 prescale
   TCCR2A  = _BV(WGM21); // Mode 2(CTC), OC2A,2B off
   // Prescale (TCCR2B) is initialized in setDisplayMode()
-  OCR2A   = 1;
   TIMSK2 |= _BV(OCIE2A);
 
   sei(); // Enable global interrupts
@@ -457,7 +460,7 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
 
         // Watch for button 'hold' conditions
         if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
-          if(bCount >= (fps * 2)) { // ~2 second hold
+          if(bCount >= (fps * 3 / 2)) { // ~1.5 second hold
             if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
             else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
             else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
@@ -494,9 +497,9 @@ ISR(INT0_vect) {
 
   uint8_t b = PIND & (_BV(PORTD3) | _BV(PORTD2));
 
-  // Any button press/release will reset timeout to ~4 sec.
+  // Any button press/release will reset timeout to ~1 sec.
   // Mode-specific code can override this based on action.
-  if(timeout < (fps * 4)) timeout = (fps * 4);
+  if(timeout < fps) timeout = fps;
 
   if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
     if((bCount > 4)) {                   // Past debounce threshold?

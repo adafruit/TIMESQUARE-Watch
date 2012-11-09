@@ -28,20 +28,17 @@ void mode_marquee(uint8_t action) {
   DateTime now;
   int      i;
 
+
   if(action != ACTION_NONE) {
 
+    // If we just arrived here (whether through mode change
+    // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
-      // Just arrived here -- reset position, submode, etc.
-  // set up pwm parameters too
+      watch.setDisplayMode(7, LED_PLEX_4, true);
+      fps   = watch.getFPS();
+      depth = 7;
+      // And begin in time-display mode:
       marqueeSubmode = MARQUEE_SUBMODE_TIME;
-
-if(action <= ACTION_HOLD_BOTH) {
-watch.setDisplayMode(7, LED_PLEX_4, true);
-fps   = watch.getFPS();
-depth = 7;
-}
-watch.setTimeout(80);
-
     } else if(action == ACTION_TAP_LEFT) {
       if(++marqueeSubmode > MARQUEE_SUBMODE_DATE)
         marqueeSubmode = MARQUEE_SUBMODE_TIME;
@@ -50,7 +47,7 @@ watch.setTimeout(80);
         marqueeSubmode = MARQUEE_SUBMODE_DATE;
     }
 
-    // Load time/date digits depending on current submode
+    // Load time/date digits depending on current submode:
     now = RTC.now();
     if(marqueeSubmode == MARQUEE_SUBMODE_TIME) {
       i = now.hour();
@@ -66,7 +63,12 @@ watch.setTimeout(80);
       if(digit[DIGIT_MON0] > 0) i += 20;
       if(digit[DIGIT_DAY0] > 0) i += 20;
     }
-    watch.setTimeout(i); // Sleep after time scrolls off left edge
+
+    // Switching modes is awkward if timeout is too
+    // close to hold time needed for mode change
+    if(i < (fps * 5 / 2)) i = fps * 5 / 2; // 2.5 sec minimum
+    // Reset sleep timeout on ANY button action
+    watch.setTimeout(i); // Sleep after time/date scrolls off left edge
 
     curX = 8; // Initialize position off right edge
     f    = 0;

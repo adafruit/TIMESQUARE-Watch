@@ -1,8 +1,9 @@
 /*
 INTERACTING WITH WATCH:
 A button 'tap' is a quick press (a second or less).
-A button 'hold' is a long press (2 seconds or longer).
-Watch will start up in time display mode.
+A button 'hold' is a long press (1.5 seconds or longer).
+Watch will start up in 'marquee' time display mode,
+or in time-setting mode if clock is unset.
 
 TIME DISPLAY MODE:
 Hold left or right button to switch forward/back between clocks.
@@ -47,7 +48,9 @@ void (*modeFunc[])(uint8_t) = {
 #define DIGIT_MIN0   8
 #define DIGIT_MIN1   9
 #define DIGIT_24    10
-uint8_t digit[11];
+#define DIGIT_SEC0  11
+#define DIGIT_SEC1  12
+uint8_t digit[13];
 int     curX;
 
 // Used by various display modes for smooth fade-out before sleep
@@ -55,29 +58,24 @@ PROGMEM uint8_t fade[] = {
    0,  1,  1,  2,  4,  5,  8, 10, 13, 17, 22, 27, 32, 39, 46,
   53, 62, 71, 82, 93,105,117,131,146,161,178,196,214,234,255 };
 
-Watch      watch(7, LED_PLEX_4, true); // 7-bit, 4 LED multiplex, double-buffered
+Watch      watch(7, LED_PLEX_4, true);
 RTC_DS1307 RTC;
 uint8_t    mode  = MODE_MARQUEE, mode_last = MODE_MARQUEE, depth = 7;
 boolean    h24   = false; // 24-hour display mode
 uint16_t   fps;
 
 void setup() {
-  DateTime now;
-
-//Serial.begin(9600); // Only works if serial port enabled in watch library
-
   Wire.begin();
   RTC.begin();
 
-  now = RTC.now();
+  DateTime now = RTC.now();
   // If clock is unset, set it to compile time and jump to time-setting mode
   if((now.year() == 2000) && (now.month()  == 1) && (now.day()    == 1) &&
-     (now.hour() == 0   ) && (now.minute() == 0) && (now.second() <  5)) {
+     (now.hour() == 0   ) && (now.minute() == 0) && (now.second() <  8)) {
     RTC.adjust(DateTime(__DATE__, __TIME__));
     mode = MODE_SET;
   }
   fps = watch.getFPS();
-  watch.setTimeout(fps * 4);
   watch.begin();
 }
 
@@ -110,7 +108,6 @@ void loop() {
   watch.swapBuffers();
 }
 
-// To do: add some higher-level clipping here
 void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h, uint8_t b) {
   int      x, y;
   uint16_t b1    = (uint16_t)b + 1; // +1 so shift (rather than divide) can be used

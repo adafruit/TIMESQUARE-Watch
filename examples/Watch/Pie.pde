@@ -216,15 +216,16 @@ void mode_pie(uint8_t action) {
   uint8_t  h, m, i, q, w, b;
   uint16_t t;
 
-  // Reset sleep timeout on any button action, even
-  // if it has no consequences in the current mode.
   if(action != ACTION_NONE) {
-    if((action >= ACTION_HOLD_LEFT) &&
-       (action <= ACTION_HOLD_BOTH)) {
+    // If we just arrived here (whether through mode change
+    // or wake from sleep), initialize the matrix driver:
+    if(action >= ACTION_HOLD_LEFT) {
       watch.setDisplayMode(4, LED_PLEX_2, true);
       fps   = watch.getFPS();
       depth = 4;
     }
+    // Reset sleep timeout on ANY button action, even
+    // if it has no consequences in the current mode.
     watch.setTimeout(fps * 3);
   }
 
