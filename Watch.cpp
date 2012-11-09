@@ -130,13 +130,13 @@ static volatile uint8_t
   *ptr,                   // Current pointer into front buffer
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
-  bCount   = 0,           // Button hold counter
   bAction  = ACTION_WAKE, // Last button action
   frames   = 0;           // Counter for delay()
 static volatile boolean
   wakeFlag = false;
 static volatile uint16_t
-  timeout = 0;            // Countdown to sleep() (in frames)
+  bCount   = 0,           // Button hold counter
+  timeout  = 0;            // Countdown to sleep() (in frames)
 
 // Constructor
 Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
@@ -190,7 +190,8 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
   bufSize = 3 * 8 * planes * passes;
 
   // Clear front image buffer
-  ptr = img[0];
+  frontIdx = 0;
+  ptr      = img[0];
   for(uint16_t i=0; i<bufSize;) {
     ptr[i++] = PORTB_OFF;
     ptr[i++] = PORTC_OFF;
@@ -206,6 +207,7 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
   }
 
   // Restart Timer2 interrupt if previously enabled:
+  TCNT2 = 0;
   if(running) TIMSK2 |= _BV(OCIE2A);
 }
 

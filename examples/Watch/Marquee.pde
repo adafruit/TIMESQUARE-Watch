@@ -34,6 +34,14 @@ void mode_marquee(uint8_t action) {
       // Just arrived here -- reset position, submode, etc.
   // set up pwm parameters too
       marqueeSubmode = MARQUEE_SUBMODE_TIME;
+
+if(action <= ACTION_HOLD_BOTH) {
+watch.setDisplayMode(7, LED_PLEX_4, true);
+fps   = watch.getFPS();
+depth = 7;
+}
+watch.setTimeout(80);
+
     } else if(action == ACTION_TAP_LEFT) {
       if(++marqueeSubmode > MARQUEE_SUBMODE_DATE)
         marqueeSubmode = MARQUEE_SUBMODE_TIME;

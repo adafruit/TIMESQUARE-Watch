@@ -244,12 +244,10 @@ void mode_set(uint8_t action) {
 // A lot of time (relatively) will be spent in time-setting
 // mode, so it's set to the most multiplexed mode (1 LED at
 // a time) to conserve power.  This allows 2 color bits max.
-// ToDo: this is screwing up the button hold case -- can't
-// exit time setting mode if depth changes.  Buh?
-//watch.setDisplayMode(2, LED_PLEX_1, true);
-//fps   = watch.getFPS();
-//depth = 2;
-
+watch.setDisplayMode(2, LED_PLEX_1, true);
+fps   = watch.getFPS();
+depth = 2;
+watch.setTimeout(fps * 10);
     dNum = curBlnk = 0;
     curX = destX = 0;
     symFade = sizeof(fade);

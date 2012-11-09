@@ -9,8 +9,19 @@ void mode_binary(uint8_t action) {
 
   // Reset sleep timeout on any button action, even
   // if it has no consequences in the current mode.
-  if(action != ACTION_NONE) watch.setTimeout(fps * 10);
+  if(action != ACTION_NONE) {
+    if((action >= ACTION_HOLD_LEFT) &&
+       (action <= ACTION_HOLD_BOTH)) {
+// This only crashes when coming from the marquee.
+// Coming from pie is OK.
+      watch.setDisplayMode(4, LED_PLEX_2, true);
+      fps   = watch.getFPS();
+      depth = 4;
+    }
+    watch.setTimeout(fps * 10);
+  }
 
+// make this use loadDigits, etc.
   now = RTC.now();
   h   = now.hour();
   if     (h  > 12) h -= 12;
