@@ -138,7 +138,8 @@ static volatile boolean
   dbuf     = false;
 static volatile uint16_t
   bCount   = 0,           // Button hold counter
-  timeout  = 10;          // Countdown to sleep() (in frames)
+  timeout  = 10,          // Countdown to sleep() (in frames)
+  oldTO    = 10;          // Last timeout value before button press
 
 // Battery monitoring idea adapted from JeeLabs article:
 // jeelabs.org/2012/05/04/measuring-vcc-via-the-bandgap/
@@ -279,7 +280,7 @@ uint16_t Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs,
   }
   fps = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
 
-  if(timeout < fps) timeout = fps;
+  if(timeout < fps) timeout = oldTO = fps; // Application can override this
 
   TIMSK2 |= _BV(OCIE2A); // (Re)start Timer2 interrupt
 
@@ -366,11 +367,15 @@ uint8_t Watch::action(void) {
 }
 
 void Watch::setTimeout(uint16_t t) {
-  timeout = t;
+  timeout = oldTO = t;
 }
 
 uint16_t Watch::getTimeout(void) {
   return timeout;
+}
+
+uint16_t Watch::getOldTimeout(void) {
+  return oldTO;
 }
 
 // Puts watch into extremely low-power state, nearly all peripherals
@@ -417,7 +422,7 @@ static void sleep(void) {
   // Timeout is immediately set to ~1 sec.  The application can then
   // override this if desired; it just needs to be set to something
   // to keep the matrix interrupt from returning to sleep.
-  timeout = fps;
+  timeout = oldTO = fps;
 
   PORTB = PORTB_OFF; // Turn all rows/columns off
   PORTC = PORTC_OFF;
@@ -561,6 +566,9 @@ ISR(INT0_vect) {
 
   // Any button press/release will reset timeout to ~1 sec.
   // Mode-specific code can override this based on action.
+  // The old timeout value (before button press) is saved,
+  // as this has implications for cursor blinking (no, really).
+  oldTO = timeout;
   if(timeout < fps) timeout = fps;
 
   if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
@@ -568,6 +576,7 @@ ISR(INT0_vect) {
       if(wakeFlag == true) {
         // First click (release) on wake does NOT perform corresponding
         // action (e.g. don't advance digit in time-setting mode).
+//if((bAction != ACTION_HOLD_LEFT) && (bAction != ACTION_HOLD_RIGHT))
         bAction  = ACTION_NONE;
         wakeFlag = false;
       } else {

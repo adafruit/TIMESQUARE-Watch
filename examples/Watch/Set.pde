@@ -225,6 +225,7 @@ static int
   destX   = 0; // Final position of date/time display
 
 void mode_set(uint8_t action) {
+  int t;
 
   if(action != ACTION_NONE) {
 
@@ -246,11 +247,20 @@ void mode_set(uint8_t action) {
       // mode, so the LED matrix is set to the most multiplexed
       // mode (1 LED at a time) to conserve power.  This allows
       // 2 color bits max.
-      depth = 2;
-      fps   = watch.setDisplayMode(depth, LED_PLEX_1, true);
+      depth   = 2;
+      fps     = watch.setDisplayMode(depth, LED_PLEX_1, true);
+      curBlnk = fps * 8 - fps / 4; // 1/4 sec to first cursor blink
+    } else {
+      // Didn't just arrive here...but about to reset timeout.
+      // Modify blink counter for a smooth transition.  The blink
+      // counter is NOT simply set to 1/4 sec in this case, as
+      // the timeout reset happens any time there's a button press,
+      // and that would look flickery and bad.  The time to next
+      // cursor blink factors in the current remaining time so it
+      // appears consistent and unaffected by buttons.
+      curBlnk = fps * 8 - (watch.getOldTimeout() - curBlnk);
     }
-
-    // Reset sleep timeout on any button action
+    // Reset sleep timeout on ANY button action.
     watch.setTimeout(fps * 8);
 
     if(action == ACTION_TAP_RIGHT) {
@@ -286,12 +296,11 @@ void mode_set(uint8_t action) {
   }
 
   drawTime();
-
   if(curX != destX) curX += (destX > curX) ? 1 : -1; // Update scroll position
   if(symFade > 0) symFade--;                         // Update symbol fade counter
-  if(++curBlnk >= (fps/6)) {                         // Update cursor blink counter
-    curBlnk = 0;
-    curOn   = !curOn;
+  if((t = watch.getTimeout()) < curBlnk) {           // Process cursor blink counter
+    curBlnk = t - fps / 4;  // Time of next blink = timeout - 1/4 sec, this
+    curOn   = !curOn;       // way it's not affected by variable frame rates.
   }
 }
 

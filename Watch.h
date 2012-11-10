@@ -39,7 +39,8 @@ class Watch : public Adafruit_GFX {
       boolean doubleBuffer=false),
     getFPS(void),
     getmV(void),
-    getTimeout(void);
+    getTimeout(void),
+    getOldTimeout(void);
 };
 
 #endif // _WATCH_H_

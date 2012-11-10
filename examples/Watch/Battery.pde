@@ -9,8 +9,13 @@ void mode_battery(uint8_t action) {
     // If we just arrived here (whether through mode change
     // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
-      depth = 2;
-      fps   = watch.setDisplayMode(depth, LED_PLEX_1, true);
+      depth   = 2;
+      fps     = watch.setDisplayMode(depth, LED_PLEX_1, true);
+      curBlnk = fps * 3 - fps / 4; // 1/4 sec to first cursor blink
+    } else {
+      // Didn't just arrive here...but about to reset timeout.
+      // Modify blink counter for a smooth transition.
+      curBlnk = fps * 3 - (watch.getOldTimeout() - curBlnk);
     }
     // Reset sleep timeout on ANY button action
     watch.setTimeout(fps * 3);
@@ -34,9 +39,9 @@ void mode_battery(uint8_t action) {
   if(i > 0)      watch.fillRect(3, 6-i, 2, i+1, fill);
   else if(curOn) watch.drawLine(3, 6, 4, 6, fill);
 
-  if(++curBlnk >= (fps/4)) {
-    curBlnk = 0;
-    curOn   = !curOn;
+  if((t = watch.getTimeout()) < curBlnk) { // Process cursor blink counter
+    curBlnk = t - fps / 4;  // Time of next blink = timeout - 1/4 sec, this
+    curOn   = !curOn;       // way it's not affected by variable frame rates.
   }
 }
 
