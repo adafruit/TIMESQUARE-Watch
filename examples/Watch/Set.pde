@@ -220,46 +220,44 @@ symbols[] = { // Various symbols (Y/M/D etc.)
 
 static uint8_t
   dNum    = 0, // Current digit # being edited
-  curBlnk = 0, // Frame counter for cursor blink
   symFade = 0; // Frame counter for symbol fade-out
 static int
   destX   = 0; // Final position of date/time display
 
 void mode_set(uint8_t action) {
 
-  DateTime now;
-  uint8_t  i;
-
   if(action != ACTION_NONE) {
-    if(action >= ACTION_HOLD_BOTH) {
-      // Just arrived -- initialize time-setting mode.
-      // A relatively large amount of time will be spent in this
-      // mode, so it's set to the most multiplexed mode (1 LED at
-      // a time) to conserve power.  This allows 2 color bits max.
-      watch.setDisplayMode(2, LED_PLEX_1, true);
-      fps   = watch.getFPS();
-      depth = 2;
 
+    if(action >= ACTION_HOLD_BOTH) {
+
+      // Just arrived -- initialize time-setting mode.
       // Load up initial clock state
-      dNum = curBlnk = 0;
+      dNum = 0;
       curX = destX = 0;
       symFade = sizeof(fade);
-      now  = RTC.now();
+      DateTime now = RTC.now();
       loadDigits(now.year() - 2000, DIGIT_YEAR0);
       loadDigits(now.month()      , DIGIT_MON0);
       loadDigits(now.day()        , DIGIT_DAY0);
       loadDigits(now.hour()       , DIGIT_HR0);
       loadDigits(now.minute()     , DIGIT_MIN0);
+
+      // A relatively large amount of time will be spent in this
+      // mode, so the LED matrix is set to the most multiplexed
+      // mode (1 LED at a time) to conserve power.  This allows
+      // 2 color bits max.
+      depth = 2;
+      fps   = watch.setDisplayMode(depth, LED_PLEX_1, true);
     }
 
     // Reset sleep timeout on any button action
-    watch.setTimeout(fps * 10);
+    watch.setTimeout(fps * 8);
 
     if(action == ACTION_TAP_RIGHT) {
 
       // Increase digit value, wrap around as appropriate
       if(dNum == DIGIT_24) {
-        for(i=1; i<7; i++) {
+        for(uint8_t i=1; i<7; i++) {
           drawTime();
           blit(odo24, 35, 16, i * 5, 0, 3, 0, 5, 8, 255);
           watch.swapBuffers();
@@ -290,8 +288,11 @@ void mode_set(uint8_t action) {
   drawTime();
 
   if(curX != destX) curX += (destX > curX) ? 1 : -1; // Update scroll position
-  if(++curBlnk >= (fps / 2)) curBlnk = 0;            // Update cursor blink counter
   if(symFade > 0) symFade--;                         // Update symbol fade counter
+  if(++curBlnk >= (fps/6)) {                         // Update cursor blink counter
+    curBlnk = 0;
+    curOn   = !curOn;
+  }
 }
 
 void flip() {
@@ -423,7 +424,7 @@ void drawTime() {
   watch.drawPixel(curX + 38, 2, brightness); watch.drawPixel(curX + 38, 4, brightness);
 
   // And underline current digit
-  if(curBlnk & 0x10) {
+  if(curOn) {
     watch.drawLine(curX + pgm_read_byte(&xOffset[dNum]), 7,
       curX + pgm_read_byte(&xOffset[dNum]) + ((dNum == DIGIT_24) ? 4 : 2), 7, brightness);
   }

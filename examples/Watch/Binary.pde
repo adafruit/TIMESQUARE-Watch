@@ -1,5 +1,5 @@
 #define BACKGROUND 0
-#define BIT_CLEAR 20
+#define BIT_CLEAR 24
 #define BIT_SET  255
 
 void mode_binary(uint8_t action) {
@@ -11,13 +11,11 @@ void mode_binary(uint8_t action) {
     // If we just arrived here (whether through mode change
     // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
-      watch.setDisplayMode(4, LED_PLEX_2, true);
-      fps   = watch.getFPS();
       depth = 4;
+      fps   = watch.setDisplayMode(depth, LED_PLEX_2, true);
     }
-    // Reset sleep timeout on ANY button action, even
-    // if it has no consequences in the current mode.
-    watch.setTimeout(fps * 10);
+    // Reset sleep timeout on ANY button action
+    watch.setTimeout(fps * 8);
   }
 
   now = RTC.now();

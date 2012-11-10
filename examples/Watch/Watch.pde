@@ -27,13 +27,15 @@ Hold both buttons to return to time display mode.
 #define MODE_MARQUEE 1
 #define MODE_BINARY  2
 #define MODE_PIE     3
+#define MODE_BATTERY 4
 // Additional display modes will be listed here
 
 void (*modeFunc[])(uint8_t) = {
   mode_set,
   mode_marquee,
   mode_binary,
-  mode_pie
+  mode_pie,
+  mode_battery
 };
 #define N_MODES (sizeof(modeFunc) / sizeof(modeFunc[0]))
 
@@ -58,11 +60,15 @@ PROGMEM uint8_t fade[] = {
    0,  1,  1,  2,  4,  5,  8, 10, 13, 17, 22, 27, 32, 39, 46,
   53, 62, 71, 82, 93,105,117,131,146,161,178,196,214,234,255 };
 
-Watch      watch(7, LED_PLEX_4, true);
+Watch      watch(2, LED_PLEX_1, true);
 RTC_DS1307 RTC;
-uint8_t    mode  = MODE_MARQUEE, mode_last = MODE_MARQUEE, depth = 7;
-boolean    h24   = false; // 24-hour display mode
-uint16_t   fps;
+uint8_t    mode      = MODE_MARQUEE,
+           mode_last = MODE_MARQUEE,
+           depth     = 2;
+boolean    h24       = false, // 24-hour display mode
+           curOn     = true;  // Cursor blink on/off state
+uint16_t   fps       = 100,
+           curBlnk   = 0;     // Cursor blink counter (time set, battery display)
 
 void setup() {
   Wire.begin();
@@ -75,7 +81,6 @@ void setup() {
     RTC.adjust(DateTime(__DATE__, __TIME__));
     mode = MODE_SET;
   }
-  fps = watch.getFPS();
   watch.begin();
 }
 

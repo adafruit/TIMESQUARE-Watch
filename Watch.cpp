@@ -121,7 +121,8 @@ static uint8_t
   napThreshold;           // If OCR2A >= this, OK for power-saving mode
 static uint16_t
   fps,                    // Estimated frames-per-second
-  bufSize;                // Size of display buffer, in bytes
+  bufSize,                // Size of display buffer, in bytes
+  mV       = 0;           // Battery voltage, in millivolts
 static volatile uint8_t
   plane,                  // Current bitplane being displayed
   pass,                   // Current matrix pass being displayed
@@ -133,22 +134,88 @@ static volatile uint8_t
   bAction  = ACTION_WAKE, // Last button action
   frames   = 0;           // Counter for delay()
 static volatile boolean
-  wakeFlag = false;
+  wakeFlag = false,
+  dbuf     = false;
 static volatile uint16_t
   bCount   = 0,           // Button hold counter
   timeout  = 10;          // Countdown to sleep() (in frames)
 
+// Battery monitoring idea adapted from JeeLabs article:
+// jeelabs.org/2012/05/04/measuring-vcc-via-the-bandgap/
+static void readVoltage() {
+
+  int i;
+
+  power_adc_enable();
+  ADMUX  = _BV(REFS0) |                        // AVcc voltage reference
+           _BV(MUX3)  | _BV(MUX2) | _BV(MUX1); // Bandgap (1.8V) input
+  ADCSRA = _BV(ADEN)  |             // Enable ADC
+           _BV(ADPS2) | _BV(ADPS1); // 1/64 prescaler (8 MHz -> 125 KHz)
+  // Datasheet notes that the first bandgap reading is usually garbage as
+  // voltages are stabilizing.  It practice, it seems to take a bit longer
+  // than that (perhaps due to sleep).  Three readings are taken, and only
+  // the last one is kept.
+  for(i=0; i<3; i++) {
+    ADCSRA |= _BV(ADSC);
+    while(ADCSRA & _BV(ADSC));
+  }
+  i      = ADC;
+  mV     = i ? (1100L * 1023 / i) : 0;
+  ADCSRA = 0; // ADC off
+  power_adc_disable();
+}
+
 // Constructor
-Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
+Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean doubleBuffer) {
   img[0] = imgSpace;
-  setDisplayMode(nPlanes, nLEDs, dbuf);
+  plex   = nLEDs;
+  planes = nPlanes;
+  dbuf   = doubleBuffer;
   constructor(8, 8); // Init Adafruit_GFX (8x8 image)
 }
 
-void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
+// Initialize PORT registers and enable timer and button interrupts.
+void Watch::begin() {
 
-  // If Timer2 interrupt is currently enabled, stop it:
-  uint8_t running = TIMSK2 & _BV(OCIE2A);
+  readVoltage();     // Battery voltage at startup
+
+  PORTB = PORTB_OFF; // Turn all rows/columns off
+  PORTC = PORTC_OFF;
+  PORTD = PORTD_OFF;
+  DDRB  = B11111111; // And enable outputs
+  DDRC  = B00001111;
+  DDRD  = B11110000;
+
+  // Disable unused peripherals
+  ADCSRA &= ~_BV(ADEN); // ADC off
+  // Timer0 interrupt is disabled as this throws off the delicate PWM
+  // timing.  Unfortunately this means delay(), millis() won't work,
+  // so we use our own methods instead for passing time.
+  TIMSK0 = 0;
+  // Disable peripherals that aren't used by this code,
+  // maybe save a tiny bit of power.
+  power_adc_disable();
+  power_spi_disable();
+  power_timer0_disable();
+  power_timer1_disable();
+  power_usart0_disable(); // Comment this out if using Serial for debugging
+
+  // Set up interrupt-on-change for buttons.
+  EICRA = _BV(ISC10)  | _BV(ISC00);  // Trigger on any logic change
+  EIMSK = _BV(INT1)   | _BV(INT0);   // Enable interrupts on pins
+  bSave = PIND & (_BV(PORTD3) | _BV(PORTD2)); // Get initial button state
+
+  // Set up Timer2 for matrix interrupt
+  TCCR2A = _BV(WGM21); // Mode 2 (CTC), OC2A,2B off
+  fps    = setDisplayMode(planes, plex, dbuf); // Prescale (TCCR2B) set here
+
+  sei(); // Enable global interrupts
+}
+
+uint16_t Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs,
+   boolean doubleBuffer) {
+
+  // Stop Timer2 and interrupt if running
   TCCR2B  = 0;
   TIMSK2 &= ~_BV(OCIE2A);
 
@@ -167,6 +234,28 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
   col    = 8;          // Likewise, will roll over to start.
   TCNT2  = 0;
   OCR2A  = 1;
+  dbuf   = doubleBuffer;
+
+  // Always 3 bytes/row * 8 rows...
+  // then multiply by number of planes and passes for total byte count:
+  bufSize = 3 * 8 * planes * passes;
+
+  // Clear front image buffer
+  frontIdx = 0;
+  ptr      = img[0];
+  for(uint16_t i=0; i<bufSize;) {
+    ptr[i++] = PORTB_OFF;
+    ptr[i++] = PORTC_OFF;
+    ptr[i++] = PORTD_OFF;
+  }
+
+  // If double-buffered, copy front image buffer to back:
+  if(dbuf) {
+    img[1] = &img[0][bufSize];
+    memcpy(img[1], img[0], bufSize);
+  } else {
+    img[1] = img[0]; // Else both point to the same address
+  }
 
   // Set the Timer2 prescaler to a value low enough to reduce flicker
   // but high enough to allow free cycles for screen drawing, sleep, etc.
@@ -190,66 +279,11 @@ void Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs, boolean dbuf) {
   }
   fps = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
 
-  // Always 3 bytes/row * 8 rows...
-  // then multiply by number of planes and passes for total byte count:
-  bufSize = 3 * 8 * planes * passes;
+  if(timeout < fps) timeout = fps;
 
-  // Clear front image buffer
-  frontIdx = 0;
-  ptr      = img[0];
-  for(uint16_t i=0; i<bufSize;) {
-    ptr[i++] = PORTB_OFF;
-    ptr[i++] = PORTC_OFF;
-    ptr[i++] = PORTD_OFF;
-  }
+  TIMSK2 |= _BV(OCIE2A); // (Re)start Timer2 interrupt
 
-  // If double-buffered, copy front image buffer to back:
-  if(dbuf) {
-    img[1] = &img[0][bufSize];
-    memcpy(img[1], img[0], bufSize);
-  } else {
-    img[1] = img[0]; // Else both point to the same address
-  }
-
-  // Restart Timer2 interrupt if previously enabled:
-  if(running) TIMSK2 |= _BV(OCIE2A);
-}
-
-// Initialize PORT registers and enable timer and button interrupts.
-void Watch::begin() {
-
-  // Disable unused peripherals
-  ADCSRA &= ~_BV(ADEN); // ADC off
-  // Timer0 interrupt is disabled as this throws off the delicate PWM
-  // timing.  Unfortunately this means delay(), millis() won't work,
-  // so we have our own methods instead for passing time.
-  TIMSK0 = 0;
-  // Disable peripherals that aren't used by this code,
-  // maybe save a tiny bit of power.
-  power_adc_disable();
-  power_spi_disable();
-  power_timer0_disable();
-  power_timer1_disable();
-  power_usart0_disable(); // Comment this out if using Serial for debugging
-
-  PORTB   = PORTB_OFF; // Turn all rows/columns off
-  PORTC   = PORTC_OFF;
-  PORTD   = PORTD_OFF;
-  DDRB    = B11111111; // And enable outputs
-  DDRC    = B00001111;
-  DDRD    = B11110000;
-
-  // Set up interrupt-on-change for buttons.
-  EICRA   = _BV(ISC10)  | _BV(ISC00);  // Trigger on any logic change
-  EIMSK   = _BV(INT1)   | _BV(INT0);   // Enable interrupts on pins
-  bSave   = PIND & (_BV(PORTD3) | _BV(PORTD2)); // Get initial button state
-
-  // Set up Timer2 for matrix interrupt.  Mode 2 (CTC), OC2A off, 1/64 prescale
-  TCCR2A  = _BV(WGM21); // Mode 2(CTC), OC2A,2B off
-  // Prescale (TCCR2B) is initialized in setDisplayMode()
-  TIMSK2 |= _BV(OCIE2A);
-
-  sei(); // Enable global interrupts
+  return fps;
 }
 
 // For double-buffered animation, call this function to display new data.
@@ -345,13 +379,20 @@ uint16_t Watch::getTimeout(void) {
 // interrupt may invoke it.
 static void sleep(void) {
 
+  int16_t i;
+  uint8_t save;
+
   // Set all ports to high-impedance input mode, enable pullups
   // on all pins (seems to use ever-so-slightly less sauce).
   DDRB  = 0   ; DDRC  = 0   ; DDRD  = 0;
   PORTB = 0xff; PORTC = 0xff; PORTD = 0xff;
 
+  // Stop Timer2, disable interrupt.
+  save    = TCCR2B;
+  TCCR2B  = 0;
+  TIMSK2 &= ~_BV(OCIE2A);
   power_timer2_disable();
-  power_twi_disable();
+  power_twi_disable(); // Stop I2C
 
   // VITALLY IMPORTANT: brown-out reset (BOR) is NOT disabled, even though
   // this can save many micro-Amps during power-down sleep.  As the coin
@@ -373,15 +414,10 @@ static void sleep(void) {
   sleep_mode();
   // Execution resumes here on wake.
 
-  // wakeFlag stops clicks from falling through on wake
-  // (e.g first click won't advance digit in time-setting mode).
-  wakeFlag = true;
-  bAction  = ACTION_WAKE;
-
-  // Enable only those peripherals used by the watch code
-  power_twi_enable();
-  Wire.begin(); // App note recommends reinitializing TWI on wake
-  power_timer2_enable();
+  // Timeout is immediately set to ~1 sec.  The application can then
+  // override this if desired; it just needs to be set to something
+  // to keep the matrix interrupt from returning to sleep.
+  timeout = fps;
 
   PORTB = PORTB_OFF; // Turn all rows/columns off
   PORTC = PORTC_OFF;
@@ -389,10 +425,33 @@ static void sleep(void) {
   DDRB  = B11111111; // And enable outputs
   DDRC  = B00001111;
   DDRD  = B11110000;
+
+  // Upon wake, a battery voltage reading is taken before PWM restarts.
+  // This gives a better impression of the 'resting' voltage of the
+  // battery, as it will drop immediately once the matrix starts up.
+  readVoltage();
+
+  // wakeFlag stops clicks from falling through on wake
+  // (e.g first click won't advance digit in time-setting mode).
+// May want long clicks to fall through!  Can't always get button
+// started soon enough in marquee mode to then switch modes.
+  wakeFlag = true;
+  bAction  = ACTION_WAKE;
+
+  // Enable only those peripherals used by the watch code
+  power_twi_enable();
+  Wire.begin(); // App note recommends reinitializing TWI on wake
+  power_timer2_enable();
+  TCCR2B  = save;        // Restore Timer2 settings
+  TIMSK2 |= _BV(OCIE2A); // and re-enable interrupt
 }
 
 uint16_t Watch::getFPS(void) {
   return fps;
+}
+
+uint16_t Watch::getmV(void) {
+  return mV;
 }
 
 // Matrix-multiplexing interrupt code
@@ -483,7 +542,10 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
   // remain lit.  This is ONLY done on higher (long duration) bitplanes
   // and if swapFlag is set -- the latter indicates that the higher-
   // level application code has finished rendering a frame and does not
-  // need further CPU cycles to itself.
+  // need further CPU cycles to itself.  This does impact the brightness
+  // of the first column very slightly as there's a few instructions'
+  // delay while the CPU wakes from sleep, but it's a fair price to pay
+  // as this provides a pretty substantial power savings (20-30%).
 
   if(swapFlag && (OCR2A >= napThreshold)) {
     set_sleep_mode(SLEEP_MODE_PWR_SAVE);
