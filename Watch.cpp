@@ -131,13 +131,13 @@ static volatile uint8_t
   *ptr,                   // Current pointer into front buffer
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
-  bAction  = ACTION_WAKE, // Last button action
-  frames   = 0;           // Counter for delay()
+  bAction  = ACTION_WAKE; // Last button action
 static volatile boolean
   wakeFlag = false,
   dbuf     = false;
 static volatile uint16_t
   bCount   = 0,           // Button hold counter
+  cCount   = 1,           // Cursor blink counter
   timeout  = 10,          // Countdown to sleep() (in frames)
   oldTO    = 10;          // Last timeout value before button press
 
@@ -190,8 +190,7 @@ void Watch::begin() {
   // Disable unused peripherals
   ADCSRA &= ~_BV(ADEN); // ADC off
   // Timer0 interrupt is disabled as this throws off the delicate PWM
-  // timing.  Unfortunately this means delay(), millis() won't work,
-  // so we use our own methods instead for passing time.
+  // timing.  Unfortunately this means delay(), millis() won't work.
   TIMSK0 = 0;
   // Disable peripherals that aren't used by this code,
   // maybe save a tiny bit of power.
@@ -278,7 +277,8 @@ uint16_t Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs,
     TCCR2B       = _BV(CS22) | _BV(CS21) | _BV(CS20);
     napThreshold = 1;
   }
-  fps = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
+  fps    = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
+  cCount = fps >> 1; // Reset cursor blink counter
 
   if(timeout < fps) timeout = oldTO = fps; // Application can override this
 
@@ -347,13 +347,6 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
       p[2] &= ~dmask;
     }
   }
-}
-
-// Because Timer0 is disabled (throws off LED brightness), our own delay
-// function is provided.  Unlike normal Arduino delay(), the units here
-// are NOT milliseconds, but frames.
-void Watch::delay(uint8_t f) {
-  for(frames = f; frames; );
 }
 
 uint8_t *Watch::backBuffer(void) {
@@ -451,12 +444,24 @@ static void sleep(void) {
   TIMSK2 |= _BV(OCIE2A); // and re-enable interrupt
 }
 
+uint8_t Watch::getPlex(void) {
+  return plex;
+}
+
+uint8_t Watch::getDepth(void) {
+  return planes;
+}
+
 uint16_t Watch::getFPS(void) {
   return fps;
 }
 
 uint16_t Watch::getmV(void) {
   return mV;
+}
+
+boolean Watch::getCursorBlink(void) {
+  return (cCount > (fps >> 2)); // Blink 2X/sec
 }
 
 // Matrix-multiplexing interrupt code
@@ -489,6 +494,9 @@ uint16_t Watch::getmV(void) {
      "I"(bit));                    \
     col = nxt;
 
+// OCR2A timings for each bitplane (255 >> (8 - plane)), saves instructions:
+PROGMEM uint8_t interval[] = { 0, 1, 3, 7, 15, 31, 63, 127, 255 };
+
 ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
 
   uint8_t *p = (uint8_t *)ptr;
@@ -504,14 +512,14 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
    case 7:  COLOFF(PORTB, 1); COLON(21, PORTD, 7, 8); break;
    default: COLOFF(PORTD, 7);
 
-    // There is no physical column #8 on the LED matrix; this is sorcery.
-    // Think of it as something like a vertical blank period between one
-    // frame and the next.  After column #7 is switched off, various
-    // counters, timers, etc. are updated before the next frame starts.
-    // Some attempts were made at handling this in the column 0 or 7
-    // cases, but always ran into issues where the extra time needed here
-    // would throw off the PWM timing.  Handling it during a discrete
-    // 'LEDs off' case avoids a whole lot of uglies.
+    // There is no physical column #8 on the LED matrix.  Think of this
+    // as something like a vertical blank period between one frame and
+    // the next.  After column #7 is switched off, various counters,
+    // timers, etc. are updated before the next frame starts.  Some
+    // attempts were made at handling this in the column 0 or 7 cases,
+    // but always ran into issues where the extra time needed here would
+    // throw off the PWM timing.  Handling it during a discrete 'LEDs
+    // off' case avoids a whole lot of uglies.
 
     ptr += 24;
     if(++pass >= passes) {    // Advance pass counter; last pass reached?
@@ -521,7 +529,6 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
         if(swapFlag && (--swapFlag == 0)) // If requested, swap buffers
           frontIdx ^= 1;                  // on return to first column
         ptr = img[frontIdx];  // Reset ptr to start of img
-
         // Watch for button 'hold' conditions
         if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
           if(bCount >= (fps * 3 / 2)) { // ~1.5 second hold
@@ -532,11 +539,11 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
           } else bCount++;      // else keep counting...
         }
 
-        if(frames > 0)  frames--;  // Counter for delay() function
-        if(timeout > 0) timeout--; // Counter for sleep timeout
-        else            sleep();   // Timeout reached.  Nap time!
+        if(--cCount == 0) cCount = fps >> 1; // Cursor blink counter
+        if(timeout > 0)   timeout--; // Counter for sleep timeout
+        else              sleep();   // Timeout reached.  Nap time!
       } // else last bitplane not reached
-      OCR2A = 255 >> (8 - plane); // Interval for next bitplane
+      OCR2A = pgm_read_byte(&interval[plane]);
     } // else last pass not reached for this bitplane
     col = 0; // Resume at column 0 on next invocation
     break;

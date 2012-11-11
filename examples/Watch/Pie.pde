@@ -220,8 +220,11 @@ void mode_pie(uint8_t action) {
     // If we just arrived here (whether through mode change
     // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
-      depth = 4;
-      fps   = watch.setDisplayMode(depth, LED_PLEX_2, true);
+      // To do: reduce depth/plex if battery voltage is low
+      uint8_t depth = 4, plex = LED_PLEX_2;
+      // Reconfigure display if needed
+      if((watch.getDepth() != depth) || (watch.getPlex() != plex))
+        fps = watch.setDisplayMode(depth, plex, true);
     }
     // Reset sleep timeout on ANY button action
     watch.setTimeout(fps * 3);

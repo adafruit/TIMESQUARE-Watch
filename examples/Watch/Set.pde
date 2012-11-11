@@ -247,18 +247,9 @@ void mode_set(uint8_t action) {
       // mode, so the LED matrix is set to the most multiplexed
       // mode (1 LED at a time) to conserve power.  This allows
       // 2 color bits max.
-      depth   = 2;
-      fps     = watch.setDisplayMode(depth, LED_PLEX_1, true);
-      curBlnk = fps * 8 - fps / 4; // 1/4 sec to first cursor blink
-    } else {
-      // Didn't just arrive here...but about to reset timeout.
-      // Modify blink counter for a smooth transition.  The blink
-      // counter is NOT simply set to 1/4 sec in this case, as
-      // the timeout reset happens any time there's a button press,
-      // and that would look flickery and bad.  The time to next
-      // cursor blink factors in the current remaining time so it
-      // appears consistent and unaffected by buttons.
-      curBlnk = fps * 8 - (watch.getOldTimeout() - curBlnk);
+      // Reconfigure display if needed
+      if((watch.getDepth() != 2) || (watch.getPlex() != LED_PLEX_1))
+        fps = watch.setDisplayMode(2, LED_PLEX_1, true);
     }
     // Reset sleep timeout on ANY button action.
     watch.setTimeout(fps * 8);
@@ -298,10 +289,6 @@ void mode_set(uint8_t action) {
   drawTime();
   if(curX != destX) curX += (destX > curX) ? 1 : -1; // Update scroll position
   if(symFade > 0) symFade--;                         // Update symbol fade counter
-  if((t = watch.getTimeout()) < curBlnk) {           // Process cursor blink counter
-    curBlnk = t - fps / 4;  // Time of next blink = timeout - 1/4 sec, this
-    curOn   = !curOn;       // way it's not affected by variable frame rates.
-  }
 }
 
 void flip() {
@@ -427,13 +414,13 @@ void drawTime() {
   blit(odo24, 35, 16, 0, h24 ? 8 : 0, curX + pgm_read_byte(&xOffset[10]), 0, 5, 8, brightness);
 
   // Add punctuation
-  brightness >>= (8 - depth); // Change blit opacity to pixel value
+  brightness >>= (8 - 2); // Change blit opacity to pixel value; 2 = depth
   watch.drawPixel(curX +  8, 3, brightness);
   watch.drawPixel(curX + 18, 3, brightness);
   watch.drawPixel(curX + 38, 2, brightness); watch.drawPixel(curX + 38, 4, brightness);
 
   // And underline current digit
-  if(curOn) {
+  if(watch.getCursorBlink()) {
     watch.drawLine(curX + pgm_read_byte(&xOffset[dNum]), 7,
       curX + pgm_read_byte(&xOffset[dNum]) + ((dNum == DIGIT_24) ? 4 : 2), 7, brightness);
   }

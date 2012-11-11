@@ -29,11 +29,12 @@ class Watch : public Adafruit_GFX {
     begin(void),
     drawPixel(int16_t x, int16_t y, uint16_t c),
     swapBuffers(uint8_t frames=1, boolean copy=false),
-    delay(uint8_t d),
     setTimeout(uint16_t t);
   uint8_t
+    *backBuffer(void),
     action(void),
-    *backBuffer(void);
+    getPlex(void),
+    getDepth(void);
   uint16_t
     setDisplayMode(uint8_t nPlanes=8, uint8_t nLEDs=LED_PLEX_8,
       boolean doubleBuffer=false),
@@ -41,6 +42,8 @@ class Watch : public Adafruit_GFX {
     getmV(void),
     getTimeout(void),
     getOldTimeout(void);
+  boolean
+    getCursorBlink(void);
 };
 
 #endif // _WATCH_H_

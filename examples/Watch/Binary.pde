@@ -4,15 +4,19 @@
 
 void mode_binary(uint8_t action) {
   DateTime now;
-  uint8_t  h, x, bit, b_set, b_clear;
+  uint8_t  h, x, bit, b_set, b_clear, depth;
   uint16_t t;
 
   if(action != ACTION_NONE) {
     // If we just arrived here (whether through mode change
     // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
+      // To do: reduce depth/plex if battery voltage is low
+      uint8_t plex = LED_PLEX_2;
       depth = 4;
-      fps   = watch.setDisplayMode(depth, LED_PLEX_2, true);
+      // Reconfigure display if needed
+      if((watch.getDepth() != depth) || (watch.getPlex() != plex))
+        fps = watch.setDisplayMode(depth, plex, true);
     }
     // Reset sleep timeout on ANY button action
     watch.setTimeout(fps * 8);
@@ -26,6 +30,7 @@ void mode_binary(uint8_t action) {
   loadDigits(now.second(), DIGIT_SEC0);
 
   // Calc set/clear colors based on current fadeout value
+  depth = watch.getDepth();
   if((t = watch.getTimeout()) < sizeof(fade)) {
     uint16_t b1 = (uint8_t)pgm_read_byte(&fade[t]) + 1;
     b_set       = (BIT_SET   * b1) >> (16 - depth);

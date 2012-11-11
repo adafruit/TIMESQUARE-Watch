@@ -63,12 +63,9 @@ PROGMEM uint8_t fade[] = {
 Watch      watch(2, LED_PLEX_1, true);
 RTC_DS1307 RTC;
 uint8_t    mode      = MODE_MARQUEE,
-           mode_last = MODE_MARQUEE,
-           depth     = 2;
-boolean    h24       = false, // 24-hour display mode
-           curOn     = true;  // Cursor blink on/off state
-uint16_t   fps       = 100,
-           curBlnk   = 0;     // Cursor blink counter (time set, battery display)
+           mode_last = MODE_MARQUEE;
+boolean    h24       = false; // 24-hour display mode
+uint16_t   fps       = 100;
 
 void setup() {
   Wire.begin();
@@ -116,7 +113,7 @@ void loop() {
 void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h, uint8_t b) {
   int      x, y;
   uint16_t b1    = (uint16_t)b + 1; // +1 so shift (rather than divide) can be used
-  uint8_t  shift = 16 - depth;
+  uint8_t  shift = 16 - watch.getDepth();
 
   for(y=0; y<h; y++) {
     for(x=0;x<w;x++) {

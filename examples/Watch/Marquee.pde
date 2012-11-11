@@ -33,10 +33,11 @@ void mode_marquee(uint8_t action) {
     // If we just arrived here (whether through mode change
     // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
-      // To do: if WAKE action, check battery voltage...
-      // if low, run in a reduced depth/plex mode.
-      depth = 7;
-      fps   = watch.setDisplayMode(depth, LED_PLEX_4, true);
+      // To do: reduce depth/plex if battery voltage is low
+      uint8_t depth = 7, plex = LED_PLEX_4;
+      // Reconfigure display if needed
+      if((watch.getDepth() != depth) || (watch.getPlex() != plex))
+        fps = watch.setDisplayMode(depth, plex, true);
       // And begin in time-display mode:
       marqueeSubmode = MARQUEE_SUBMODE_TIME;
     } else if(action == ACTION_TAP_LEFT) {
