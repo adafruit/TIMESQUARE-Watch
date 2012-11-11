@@ -232,8 +232,7 @@ uint16_t Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs,
   plane  = planes - 1; // plane and pass are set to the max values
   pass   = passes - 1; // so they'll 'wrap' on the next interrupt.
   col    = 8;          // Likewise, will roll over to start.
-  TCNT2  = 0;
-  OCR2A  = 1;
+  TCNT2  = OCR2A = 0;
   dbuf   = doubleBuffer;
 
   // Always 3 bytes/row * 8 rows...
@@ -494,9 +493,6 @@ boolean Watch::getCursorBlink(void) {
      "I"(bit));                    \
     col = nxt;
 
-// OCR2A timings for each bitplane (255 >> (8 - plane)), saves instructions:
-PROGMEM uint8_t interval[] = { 0, 1, 3, 7, 15, 31, 63, 127, 255 };
-
 ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
 
   uint8_t *p = (uint8_t *)ptr;
@@ -525,7 +521,7 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
     if(++pass >= passes) {    // Advance pass counter; last pass reached?
       pass = 0;               // Reset back to pass #0
       if(++plane >= planes) { // Advance plane counter; last plane reached?
-        plane = 0;            // Reset back to plane #0
+        OCR2A = plane = 0;                // Reset back to plane #0
         if(swapFlag && (--swapFlag == 0)) // If requested, swap buffers
           frontIdx ^= 1;                  // on return to first column
         ptr = img[frontIdx];  // Reset ptr to start of img
@@ -538,12 +534,10 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
             bSave = bCount = 0; // So button release code isn't confused
           } else bCount++;      // else keep counting...
         }
-
         if(--cCount == 0) cCount = fps >> 1; // Cursor blink counter
         if(timeout > 0)   timeout--; // Counter for sleep timeout
         else              sleep();   // Timeout reached.  Nap time!
-      } // else last bitplane not reached
-      OCR2A = pgm_read_byte(&interval[plane]);
+      } else OCR2A = (OCR2A << 1) | 1; // Last bitplane not yet reached
     } // else last pass not reached for this bitplane
     col = 0; // Resume at column 0 on next invocation
     break;
