@@ -422,7 +422,7 @@ void drawTime() {
   // And underline current digit
   if(watch.getCursorBlink()) {
     watch.drawLine(curX + pgm_read_byte(&xOffset[dNum]), 7,
-      curX + pgm_read_byte(&xOffset[dNum]) + ((dNum == DIGIT_24) ? 4 : 2), 7, brightness);
+      curX + pgm_read_byte(&xOffset[dNum]) + ((dNum == DIGIT_24) ? 4 : 2), 7, brightness >> 1);
   }
 }
 

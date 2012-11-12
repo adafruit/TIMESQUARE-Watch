@@ -111,9 +111,13 @@ void loop() {
 }
 
 void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h, uint8_t b) {
-  int      x, y;
-  uint16_t b1    = (uint16_t)b + 1; // +1 so shift (rather than divide) can be used
-  uint8_t  shift = 16 - watch.getDepth();
+  uint16_t b1;
+  uint8_t  shift, x, y;
+
+  if((dx >= 8) || ((dx + w - 1) < 0)) return;  // Quick X-only clipping
+
+  b1    = (uint16_t)b + 1; // +1 so shift (rather than divide) can be used
+  shift = 16 - watch.getDepth();
 
   for(y=0; y<h; y++) {
     for(x=0;x<w;x++) {
