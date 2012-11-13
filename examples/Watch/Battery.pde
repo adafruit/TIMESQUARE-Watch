@@ -1,3 +1,5 @@
+// Battery 'fuel gauge' display.
+
 PROGMEM uint16_t mVtable[] = { 2650, 2700, 2750, 2800, 65535 };
 
 void mode_battery(uint8_t action) {
@@ -27,9 +29,12 @@ void mode_battery(uint8_t action) {
   }
 
   watch.fillScreen(0);
+
+  // Draw battery outline
   watch.drawRect(2, 1, 4, 7, border);
   watch.drawLine(3, 0, 4, 0, border);
 
+  // Draw battery 'fuel' inside (blink if very low)
   t = watch.getmV();
   for(i=0; (i<5) && (t>pgm_read_word(&mVtable[i])); i++);
   if(i > 0)                       watch.fillRect(3, 6-i, 2, i+1, fill);

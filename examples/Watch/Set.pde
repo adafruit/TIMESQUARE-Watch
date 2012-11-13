@@ -1,4 +1,4 @@
-PROGMEM uint8_t odoDigits[] = { // Odometer-style digits w/motion blur
+PROGMEM uint8_t odoDigits[] = { // Odometer-style digits
   0x00,0x00,0x00,0x10,0x40,0x10,0xB0,0x1C,0xB0,0xC3,0x10,0xC3,0x64,0x10,0x64,0x07,
   0x1C,0x07,0x00,0x00,0x00,0x40,0xFF,0x40,0x91,0x40,0x91,0xFF,0x00,0xFF,0x64,0x10,
   0x64,0x24,0x10,0x24,0x00,0x00,0x00,0x00,0x40,0x00,0xFF,0x00,0xFF,0xFF,0x00,0xFF,
@@ -275,11 +275,12 @@ void mode_set(uint8_t action) {
       if(++dNum > DIGIT_24) dNum = DIGIT_YEAR0;
       destX = -pgm_read_byte(&xScroll[dNum]);
   
-      // When switching to first digit of new section, fade out corresponding symbol
-      if((dNum == DIGIT_YEAR0) || (dNum == DIGIT_MON0) || (dNum == DIGIT_DAY0) ||
-         (dNum == DIGIT_HR0  ) || (dNum == DIGIT_MIN0)) {
-         symFade = sizeof(fade) + 5;            // Run a few frames at full brightness
-         if(dNum == DIGIT_YEAR0) symFade += 48; // Allow extra time for scrolling
+      // When switching to first digit of new section,
+      // fade out corresponding overlay symbol
+      if((dNum==DIGIT_YEAR0) || (dNum==DIGIT_MON0) || (dNum==DIGIT_DAY0) ||
+         (dNum==DIGIT_HR0  ) || (dNum==DIGIT_MIN0)) {
+         symFade = sizeof(fade) + 5; // Run a few frames at full brightness
+         if(dNum == DIGIT_YEAR0) symFade += 48; // Allow extra scrolling time
        }
 
     }
@@ -287,7 +288,7 @@ void mode_set(uint8_t action) {
 
   drawTime();
   if(curX != destX) curX += (destX > curX) ? 1 : -1; // Update scroll position
-  if(symFade > 0) symFade--;                         // Update symbol fade counter
+  if(symFade > 0) symFade--; // Update symbol fade counter
 }
 
 void flip() {
@@ -317,9 +318,10 @@ void flip() {
         uint8_t m = digit[DIGIT_MON0] * 10 + digit[DIGIT_MON1];
         upper = pgm_read_byte(&daysInMonth[m - 1]) % 10;
       // Finally, the dreaded leap year...
-      } else if((digit[DIGIT_DAY0] == 2) && (digit[DIGIT_MON0] == 0) && (digit[DIGIT_MON1] == 1)) {
+      } else if((digit[DIGIT_DAY0] == 2) && (digit[DIGIT_MON0] == 0) &&
+                (digit[DIGIT_MON1] == 1)) {
         uint8_t y = digit[DIGIT_YEAR0] * 10 + digit[DIGIT_YEAR1];
-        if((y == 0) || (y & 3)) upper = 8; // non-leap year ('00' == 2100, non-leap year)
+        if((y == 0) || (y & 3)) upper = 8; // non-leap year
       }
     } else if(dNum == DIGIT_HR1) {
       if(digit[DIGIT_HR0] == 2) upper = 3;
@@ -369,7 +371,7 @@ void flip() {
     upper = pgm_read_byte(&daysInMonth[m - 1]);
     if(m == 2) { // is February
       uint8_t y = digit[DIGIT_YEAR0] * 10 + digit[DIGIT_YEAR1];
-      if((y > 0) && !(y & 3)) upper = 29; // is leap year ('00' == 2100, non-leap year)
+      if((y > 0) && !(y & 3)) upper = 29; // is leap year
     }
     if(d > upper)  loadDigits(upper, DIGIT_DAY0);
     else if(d < 1) loadDigits(1, DIGIT_DAY0);
@@ -380,8 +382,9 @@ void flip() {
   }
 }
 
-PROGMEM uint8_t symX[]      = { 0, 5, 14, 9, 5, 19 }, // Starting column # in symbols bitmap
-                symOffset[] = { 2, 0,  0, 0, 0,  0 }; // Add to X when drawing symbol
+PROGMEM uint8_t
+  symX[]      = { 0, 5, 14, 9, 5, 19 }, // Starting column # in symbols bitmap
+  symOffset[] = { 2, 0,  0, 0, 0,  0 }; // Add to X when drawing symbol
 
 void drawTime() {
   uint8_t  i, brightness;
@@ -393,7 +396,8 @@ void drawTime() {
     ((255 * ((uint8_t)pgm_read_byte(&fade[t]) + 1)) >> 8) : 255;
 
   uint8_t b = (symFade < sizeof(fade)) ?
-    ((brightness * ((uint8_t)pgm_read_byte(&fade[symFade]) + 1)) >> 8) : brightness;
+    ((brightness * ((uint8_t)pgm_read_byte(&fade[symFade]) + 1)) >> 8) :
+    brightness;
 
   if(symFade) {
     blit(symbols, 24, 5, pgm_read_byte(&symX[dNum / 2]), 0,
@@ -406,22 +410,26 @@ void drawTime() {
       i++;
       continue;
     }
-    blit(odoDigits, 21, 136, 0, digit[i] * 8 + 1, curX + pgm_read_byte(&xOffset[i]), 1, 3, 5, brightness);
+    blit(odoDigits, 21, 136, 0, digit[i] * 8 + 1,
+      curX + pgm_read_byte(&xOffset[i]), 1, 3, 5, brightness);
   }
 
   // draw 12/24
-  blit(odo24, 35, 16, 0, h24 ? 8 : 0, curX + pgm_read_byte(&xOffset[10]), 0, 5, 8, brightness);
+  blit(odo24, 35, 16, 0, h24 ? 8 : 0,
+    curX + pgm_read_byte(&xOffset[10]), 0, 5, 8, brightness);
 
   // Add punctuation
   brightness >>= (8 - 2); // Change blit opacity to pixel value; 2 = depth
   watch.drawPixel(curX +  8, 3, brightness);
   watch.drawPixel(curX + 18, 3, brightness);
-  watch.drawPixel(curX + 38, 2, brightness); watch.drawPixel(curX + 38, 4, brightness);
+  watch.drawPixel(curX + 38, 2, brightness);
+  watch.drawPixel(curX + 38, 4, brightness);
 
   // And underline current digit
   if(watch.getCursorBlink()) {
     watch.drawLine(curX + pgm_read_byte(&xOffset[dNum]), 7,
-      curX + pgm_read_byte(&xOffset[dNum]) + ((dNum == DIGIT_24) ? 4 : 2), 7, brightness >> 1);
+      curX + pgm_read_byte(&xOffset[dNum]) + ((dNum == DIGIT_24) ? 4 : 2),
+      7, brightness >> 1);
   }
 }
 

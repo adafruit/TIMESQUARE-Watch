@@ -141,6 +141,15 @@ static volatile uint16_t
   timeout  = 10,          // Countdown to sleep() (in frames)
   oldTO    = 10;          // Last timeout value before button press
 
+// Constructor
+Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean doubleBuffer) {
+  img[0] = imgSpace;
+  plex   = nLEDs;
+  planes = nPlanes;
+  dbuf   = doubleBuffer;
+  constructor(8, 8); // Init Adafruit_GFX (8x8 image)
+}
+
 // Battery monitoring idea adapted from JeeLabs article:
 // jeelabs.org/2012/05/04/measuring-vcc-via-the-bandgap/
 static void readVoltage() {
@@ -154,25 +163,15 @@ static void readVoltage() {
            _BV(ADPS2) | _BV(ADPS1); // 1/64 prescaler (8 MHz -> 125 KHz)
   // Datasheet notes that the first bandgap reading is usually garbage as
   // voltages are stabilizing.  It practice, it seems to take a bit longer
-  // than that (perhaps due to sleep).  Three readings are taken, and only
+  // than that (perhaps due to sleep).  Four readings are taken, and only
   // the last one is kept.
-  for(i=0; i<3; i++) {
-    ADCSRA |= _BV(ADSC);
-    while(ADCSRA & _BV(ADSC));
+  for(i=0; i<4; i++) {
+    for(ADCSRA |= _BV(ADSC); ADCSRA & _BV(ADSC); );
   }
   i      = ADC;
   mV     = i ? (1100L * 1023 / i) : 0;
   ADCSRA = 0; // ADC off
   power_adc_disable();
-}
-
-// Constructor
-Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean doubleBuffer) {
-  img[0] = imgSpace;
-  plex   = nLEDs;
-  planes = nPlanes;
-  dbuf   = doubleBuffer;
-  constructor(8, 8); // Init Adafruit_GFX (8x8 image)
 }
 
 // Initialize PORT registers and enable timer and button interrupts.

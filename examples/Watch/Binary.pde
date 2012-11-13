@@ -1,3 +1,7 @@
+// Binary watch display.  Hours are shown as a 4-bit value across the top,
+// using 2x2 squares.  Minutes and seconds and broken out into high and
+// low BCD digits, displayed as 3- and 4-bit values, 1 pixel per bit.
+
 #define BACKGROUND 0
 #define BIT_CLEAR 24
 #define BIT_SET  255

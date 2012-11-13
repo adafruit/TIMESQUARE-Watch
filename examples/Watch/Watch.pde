@@ -111,7 +111,8 @@ void loop() {
   watch.swapBuffers();
 }
 
-void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy, int w, int h, uint8_t b) {
+void blit(uint8_t *img, int iw, int ih, int sx, int sy, int dx, int dy,
+ int w, int h, uint8_t b) {
   uint16_t b1;
   uint8_t  shift, x, y;
 
