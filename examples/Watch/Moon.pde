@@ -37,7 +37,10 @@ PROGMEM uint8_t phases[] = {
 uint8_t phase = 0;
 
 // Time/date of a known new moon (UNIX time) - Jan 7 1970 20:35
-#define NEW_MOON (((6L * 24L + 20L) * 60L + 35L) * 60L)
+//#define NEW_MOON (((6L * 24L + 20L) * 60L + 35L) * 60L)
+
+// Time/date of a known new moon (UNIX time) - Dec 7 1999 22:32
+#define NEW_MOON 944605920
 #define LP       2551443L // Lunar period in seconds
 
 void mode_moon(uint8_t action) {
@@ -46,9 +49,15 @@ void mode_moon(uint8_t action) {
     // If we just arrived here (whether through mode change
     // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
+      uint8_t depth = 7, plex = LED_PLEX_4;
+      // Reduce depth/plex if battery voltage is low
+      if(watch.getmV() < 2700) {
+        depth = 2;
+        plex  = LED_PLEX_1;
+      }
       // Reconfigure display if needed
-      if((watch.getDepth() != 7) || (watch.getPlex() != LED_PLEX_4))
-        fps = watch.setDisplayMode(7, LED_PLEX_4, true);
+      if((watch.getDepth() != depth) || (watch.getPlex() != plex))
+        fps = watch.setDisplayMode(depth, plex, true);
         DateTime now = RTC.now();
         long nao = now.unixtime();
         phase    = (uint8_t) (((nao - NEW_MOON) % LP) / (24L * 3600L));
@@ -57,10 +66,13 @@ void mode_moon(uint8_t action) {
     watch.setTimeout(fps * 3);
   }
 
+  uint16_t t = watch.getTimeout();
+  uint8_t  b = (t < sizeof(fade)) ? (uint8_t)pgm_read_byte(&fade[t]) : 255;
+
   watch.fillScreen(0);
-  blit(phases, 64, 8, pgm_read_byte(&rightHalf[phase]) * 4 ,0, 4, 0, 4, 8, 255 );
+  blit(phases, 64, 8, pgm_read_byte(&rightHalf[phase]) * 4 ,0, 4, 0, 4, 8, b );
   watch.setRotation(2);
-  blit(phases, 64, 8, pgm_read_byte(&leftHalf[phase])  * 4 ,0, 4, 0, 4, 8, 255 );
+  blit(phases, 64, 8, pgm_read_byte(&leftHalf[phase])  * 4 ,0, 4, 0, 4, 8, b );
   watch.setRotation(0);
 }
 

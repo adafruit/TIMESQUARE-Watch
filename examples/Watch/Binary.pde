@@ -11,9 +11,13 @@ void mode_binary(uint8_t action) {
     // If we just arrived here (whether through mode change
     // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
-      // To do: reduce depth/plex if battery voltage is low
       uint8_t plex = LED_PLEX_2;
       depth = 4;
+      // Reduce depth/plex if battery voltage is low
+      if(watch.getmV() < 2700) {
+        depth = 2;
+        plex  = LED_PLEX_1;
+      }
       // Reconfigure display if needed
       if((watch.getDepth() != depth) || (watch.getPlex() != plex))
         fps = watch.setDisplayMode(depth, plex, true);

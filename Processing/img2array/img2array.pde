@@ -1,7 +1,6 @@
 // img2array: Converts image file to an Arduino PROGMEM array.
 // Copy and paste output from Processing console to Arduino sketch,
 // change array name as needed ('img[]' used by default).
-
 void setup() {
 
   String filename;
