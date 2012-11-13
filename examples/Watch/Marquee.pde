@@ -180,7 +180,7 @@ void mode_marquee(uint8_t action) {
         if(i > 12)      i -= 12;
         else if(i == 0) i  = 12;
         loadDigits(i, DIGIT_HR0);
-        if(i > 10) str[len++] = 1;
+        if(i >= 10) str[len++] = 1;
       }
       str[len++] = digit[DIGIT_HR1];
       str[len++] = SYM_COLON;

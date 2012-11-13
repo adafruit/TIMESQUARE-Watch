@@ -225,7 +225,6 @@ static int
   destX   = 0; // Final position of date/time display
 
 void mode_set(uint8_t action) {
-  int t;
 
   if(action != ACTION_NONE) {
 

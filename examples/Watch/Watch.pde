@@ -27,14 +27,15 @@ Hold both buttons to return to time display mode.
 #define MODE_MARQUEE 1
 #define MODE_BINARY  2
 #define MODE_PIE     3
-#define MODE_BATTERY 4
-// Additional display modes will be listed here
+#define MODE_MOON    4
+#define MODE_BATTERY 5
 
 void (*modeFunc[])(uint8_t) = {
   mode_set,
   mode_marquee,
   mode_binary,
   mode_pie,
+  mode_moon,
   mode_battery
 };
 #define N_MODES (sizeof(modeFunc) / sizeof(modeFunc[0]))
