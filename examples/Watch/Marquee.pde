@@ -172,6 +172,7 @@ static int8_t
 void mode_marquee(uint8_t action) {
   DateTime now;
   uint8_t  i;
+  int      x, sum;
 
   if(action != ACTION_NONE) {
 
@@ -225,7 +226,7 @@ void mode_marquee(uint8_t action) {
       str[len++] = digit[DIGIT_YEAR1];
     }
 
-    int sum = 0;
+    sum = 0;
     for(i=0; i<len; i++) sum += pgm_read_byte(&digitWidth[str[i]]);
 
     // Switching modes is awkward if timeout is too
@@ -239,10 +240,10 @@ void mode_marquee(uint8_t action) {
   }
 
   watch.fillScreen(0);
-  int xx = curX;
+  x = curX;
   for(i=0; i<len; i++) {
-    blit(marqueeDigits, 76, 32, pgm_read_byte(&digitX[str[i]]), f, xx, 0, pgm_read_byte(&digitWidth[str[i]]), 8, 255 );
-    xx += pgm_read_byte(&digitWidth[str[i]]);
+    blit(marqueeDigits, 76, 32, pgm_read_byte(&digitX[str[i]]), f, x, 0, pgm_read_byte(&digitWidth[str[i]]), 8, 255 );
+    x += pgm_read_byte(&digitWidth[str[i]]);
   }
 
   // Every fourth frame, shift text left 1 pixel.  X is not reset or wrapped here...
