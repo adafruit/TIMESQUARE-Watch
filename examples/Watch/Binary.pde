@@ -18,7 +18,7 @@ void mode_binary(uint8_t action) {
       uint8_t plex = LED_PLEX_2;
       depth = 4;
       // Reduce depth/plex if battery voltage is low
-      if(watch.getmV() < 2700) {
+      if(watch.getmV() < 2880) {
         depth = 2;
         plex  = LED_PLEX_1;
       }

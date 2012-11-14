@@ -131,15 +131,16 @@ static volatile uint8_t
   *ptr,                   // Current pointer into front buffer
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
-  bAction  = ACTION_WAKE; // Last button action
+  bAction  = ACTION_WAKE, // Last button action
+  sCount   = 0;
 static volatile boolean
   wakeFlag = false,
+  holdFlag = false,
   dbuf     = false;
 static volatile uint16_t
   bCount   = 0,           // Button hold counter
   cCount   = 1,           // Cursor blink counter
   timeout  = 10;          // Countdown to sleep() (in frames)
-static volatile uint8_t sCount = 0;
 
 // Constructor
 Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean doubleBuffer) {
@@ -429,6 +430,16 @@ static void sleep(void) {
   bAction  = ACTION_WAKE;
   sCount   = 0; // Reset the "smoosh detect"
 
+  // The front image buffer is cleared upon wake.  This avoids a frame
+  // of old content from showing when the matrix interrupt is re-enabled
+  // before the application code can process the input and redraw.
+  uint8_t *p = img[frontIdx];
+  for(uint16_t i=0; i<bufSize;) {
+    p[i++] = PORTB_OFF;
+    p[i++] = PORTC_OFF;
+    p[i++] = PORTD_OFF;
+  }
+
   // Enable only those peripherals used by the watch code
   power_twi_enable();
   Wire.begin(); // App note recommends reinitializing TWI on wake
@@ -487,6 +498,7 @@ boolean Watch::getCursorBlink(void) {
      "I"(bit));                    \
     col = nxt;
 
+
 ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
 
   uint8_t *p = (uint8_t *)ptr;
@@ -523,42 +535,21 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
         // Watch for button 'hold' conditions
         if(bSave != (_BV(PORTD3) | _BV(PORTD2))) { // button(s) held
 
-          if(bCount >= (fps * 2)) { // ~2 second hold
-// problem -- holding down is going into time-setting mode
-// (presumably because bSave == 0)
-            if(++sCount == 5) { // If held for 10 sec, assume watch button
-              sleep();          // is "smooshed," not intentionally pressed.
-            }
-            bCount = 0;
+          if(bCount >= (fps * 3 / 2)) { // ~1.5 second hold
+            // If held for 9+ sec, assume watch has been "smooshed"
+            // (e.g. in pocket), not intentionally pressed.
+            if(++sCount == 6) sleep();
             if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
             else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
             else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
-            bSave = bCount = 0; // So button release code isn't confused
-bSave = _BV(PORTD3) | _BV(PORTD2);
+            holdFlag = (bAction >= ACTION_HOLD_LEFT);
+            bCount   = 0; // Reset debounce counter
           } else bCount++;      // else keep counting...
         } else {
-
-// Look through application code for situations where
-// timeout is set unreasonably long (e.g. in marquee mode,
-// it only needs to be as long as the scroller, no longer).
-// Only do timeout if buttons are released!
-          if(timeout > 0)   timeout--; // Counter for sleep timeout
-          else              sleep();   // Timeout reached.  Nap time!
+          if(timeout > 0) timeout--; // Counter for sleep timeout
+          else            sleep();   // Timeout reached.  Nap time!
         }
         if(--cCount == 0) cCount = fps >> 1; // Cursor blink counter
-
-#ifdef SLART
-          if(bCount >= (fps * 3 / 2)) { // ~1.5 second hold
-            if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
-            else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
-            else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
-            bSave = bCount = 0; // So button release code isn't confused
-          } else bCount++;      // else keep counting...
-        }
-        if(--cCount == 0) cCount = fps >> 1; // Cursor blink counter
-        if(timeout > 0)   timeout--; // Counter for sleep timeout
-        else              sleep();   // Timeout reached.  Nap time!
-#endif
       } else OCR2A = (OCR2A << 1) | 1; // Last bitplane not yet reached
     } // else last pass not reached for this bitplane
     col = 0; // Resume at column 0 on next invocation
@@ -589,48 +580,31 @@ ISR(INT0_vect) {
 
   // Any button press/release will reset timeout to ~1 sec.
   // Mode-specific code can override this based on action.
-  // The old timeout value (before button press) is saved,
-  // as this has implications for cursor blinking (no, really).
   if(timeout < fps) timeout = fps;
 
   if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
-    if((bCount > 4)) {                   // Past debounce threshold?
+    if((bCount > 3)) {                   // Past debounce threshold?
       if(wakeFlag == true) {
         // First click (release) on wake does NOT perform corresponding
         // action (e.g. don't advance digit in time-setting mode).
         bAction  = ACTION_NONE;
         wakeFlag = false;
       } else {
-        if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;
-        else if(bSave == _BV(PORTD2)) bAction = ACTION_TAP_RIGHT;
+        // If we arrived here by a mode switch (extended hold),
+        // the button release should NOT register as a tap.
+        if(holdFlag) {
+          bAction  = ACTION_NONE;
+          holdFlag = false;
+        } else {
+          if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;
+          else if(bSave == _BV(PORTD2)) bAction = ACTION_TAP_RIGHT;
+        }
       }
     }
-  } else if(b != bSave) bCount = 0; // Button press; clear debounce counter
+    bCount = sCount = 0;
+  } else if(b != bSave) bCount = sCount = 0; // Button press; clear counters
   bSave = b; // Note last button state
 }
 
 ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
-
-
-/*
-Interaction change:
-ANY tap will wake watch, period.
-As long as button is held down, timeout will not occur, with
-  exception of very long hold (10 sec?) -- will sleep then because
-  it's likely an inadvertent 'smoosh'.
-If button is held down longer than 2 sec, advance modes.
-Don't wake on button release?
-Start timeout countdown on button release?
-First tap does NOT perform action, it only wakes.
-Action does not occur until button is released (for taps) or
-2 sec has passed (for holds)
-
-So -- taps are detected in the interrupt (on release),
-holds are detected in the matrix interrupt.
-
-FPS varies with mode, and a sustained hold may move through several
-modes.  Therefore, rather than one long hold counter, an elapsed seconds
-counter should be kept for the "smooshed" detection.
-
-*/
 

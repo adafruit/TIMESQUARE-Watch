@@ -1,6 +1,6 @@
 // Battery 'fuel gauge' display.
 
-PROGMEM uint16_t mVtable[] = { 2650, 2700, 2750, 2800, 65535 };
+PROGMEM uint16_t mVtable[] = { 2882, 2885, 2889, 2896, 65535 };
 
 void mode_battery(uint8_t action) {
 

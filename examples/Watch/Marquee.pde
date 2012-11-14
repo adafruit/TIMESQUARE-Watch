@@ -166,7 +166,7 @@ void mode_marquee(uint8_t action) {
     if(action >= ACTION_HOLD_LEFT) {
       uint8_t depth = 7, plex = LED_PLEX_4;
       // Reduce depth/plex if battery voltage is low
-      if(watch.getmV() < 2700) {
+      if(watch.getmV() < 2880) {
         depth = 2;
         plex  = LED_PLEX_1;
       }
@@ -220,9 +220,6 @@ void mode_marquee(uint8_t action) {
     sum = 0;
     for(i=0; i<len; i++) sum += pgm_read_byte(&digitWidth[str[i]]);
 
-    // Switching modes is awkward if timeout is too
-    // close to hold time needed for mode change
-//    if(sum < (fps * 5 / 2)) sum = fps * 5 / 2; // 2.5 sec minimum
     // Reset sleep timeout on ANY button action
     watch.setTimeout((sum + 8) * 4); // Sleep after time/date scrolls off left edge
 

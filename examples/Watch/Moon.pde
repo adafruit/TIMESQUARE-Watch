@@ -64,7 +64,7 @@ void mode_moon(uint8_t action) {
     if(action >= ACTION_HOLD_LEFT) {
       uint8_t depth = 7, plex = LED_PLEX_4;
       // Reduce depth/plex if battery voltage is low
-      if(watch.getmV() < 2700) {
+      if(watch.getmV() < 2880) {
         depth = 2;
         plex  = LED_PLEX_1;
       }
