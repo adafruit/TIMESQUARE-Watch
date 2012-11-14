@@ -138,8 +138,9 @@ static volatile boolean
 static volatile uint16_t
   bCount   = 0,           // Button hold counter
   cCount   = 1,           // Cursor blink counter
-  timeout  = 10;          // Countdown to sleep() (in frames)
-static volatile uint8_t sCount = 0;
+  timeout  = 10,          // Countdown to sleep() (in frames)
+  oldTO    = 10;          // Last timeout value before button press
+static volatile uint8_t longCount = 0;
 
 // Constructor
 Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean doubleBuffer) {
@@ -278,7 +279,7 @@ uint16_t Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs,
   fps    = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
   cCount = fps >> 1; // Reset cursor blink counter
 
-  if(timeout < fps) timeout = fps; // Application can override this
+  if(timeout < fps) timeout = oldTO = fps; // Application can override this
 
   TIMSK2 |= _BV(OCIE2A); // (Re)start Timer2 interrupt
 
@@ -358,11 +359,15 @@ uint8_t Watch::action(void) {
 }
 
 void Watch::setTimeout(uint16_t t) {
-  timeout = t;
+  timeout = oldTO = t;
 }
 
 uint16_t Watch::getTimeout(void) {
   return timeout;
+}
+
+uint16_t Watch::getOldTimeout(void) {
+  return oldTO;
 }
 
 // Puts watch into extremely low-power state, nearly all peripherals
@@ -409,7 +414,7 @@ static void sleep(void) {
   // Timeout is immediately set to ~1 sec.  The application can then
   // override this if desired; it just needs to be set to something
   // to keep the matrix interrupt from returning to sleep.
-  timeout = fps;
+  timeout = oldTO = fps;
 
   PORTB = PORTB_OFF; // Turn all rows/columns off
   PORTC = PORTC_OFF;
@@ -425,9 +430,11 @@ static void sleep(void) {
 
   // wakeFlag stops clicks from falling through on wake
   // (e.g first click won't advance digit in time-setting mode).
+// May want long clicks to fall through!  Can't always get button
+// started soon enough in marquee mode to then switch modes.
   wakeFlag = true;
   bAction  = ACTION_WAKE;
-  sCount   = 0; // Reset the "smoosh detect"
+longCount = 0; // reset smoosh detect
 
   // Enable only those peripherals used by the watch code
   power_twi_enable();
@@ -521,26 +528,25 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
         ptr = img[frontIdx];  // Reset ptr to start of img
 
         // Watch for button 'hold' conditions
-        if(bSave != (_BV(PORTD3) | _BV(PORTD2))) { // button(s) held
+        if(bSave != (_BV(PORTD3) | _BV(PORTD2))) {
+// if short count > 1 sec then inc long count, reset short count
+// if long count > 10 sec then sleep
+// else if long count == 2, action = hold
 
+// Look through application code for situations where
+// timeout is set unreasonably long (e.g. in marquee mode,
+// it only needs to be as long as the scroller, no longer).
           if(bCount >= (fps * 2)) { // ~2 second hold
-// problem -- holding down is going into time-setting mode
-// (presumably because bSave == 0)
-            if(++sCount == 5) { // If held for 10 sec, assume watch button
-              sleep();          // is "smooshed," not intentionally pressed.
+            if(++longCount == 5) {
+              sleep(); // "smoosh" detect
             }
             bCount = 0;
             if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
             else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
             else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
             bSave = bCount = 0; // So button release code isn't confused
-bSave = _BV(PORTD3) | _BV(PORTD2);
           } else bCount++;      // else keep counting...
         } else {
-
-// Look through application code for situations where
-// timeout is set unreasonably long (e.g. in marquee mode,
-// it only needs to be as long as the scroller, no longer).
 // Only do timeout if buttons are released!
           if(timeout > 0)   timeout--; // Counter for sleep timeout
           else              sleep();   // Timeout reached.  Nap time!
@@ -591,6 +597,7 @@ ISR(INT0_vect) {
   // Mode-specific code can override this based on action.
   // The old timeout value (before button press) is saved,
   // as this has implications for cursor blinking (no, really).
+  oldTO = timeout;
   if(timeout < fps) timeout = fps;
 
   if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
@@ -598,6 +605,7 @@ ISR(INT0_vect) {
       if(wakeFlag == true) {
         // First click (release) on wake does NOT perform corresponding
         // action (e.g. don't advance digit in time-setting mode).
+//if((bAction != ACTION_HOLD_LEFT) && (bAction != ACTION_HOLD_RIGHT))
         bAction  = ACTION_NONE;
         wakeFlag = false;
       } else {

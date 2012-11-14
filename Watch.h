@@ -40,8 +40,7 @@ class Watch : public Adafruit_GFX {
       boolean doubleBuffer=false),
     getFPS(void),
     getmV(void),
-    getTimeout(void),
-    getOldTimeout(void);
+    getTimeout(void);
   boolean
     getCursorBlink(void);
 };

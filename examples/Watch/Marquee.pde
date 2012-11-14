@@ -222,9 +222,9 @@ void mode_marquee(uint8_t action) {
 
     // Switching modes is awkward if timeout is too
     // close to hold time needed for mode change
-    if(sum < (fps * 5 / 2)) sum = fps * 5 / 2; // 2.5 sec minimum
+//    if(sum < (fps * 5 / 2)) sum = fps * 5 / 2; // 2.5 sec minimum
     // Reset sleep timeout on ANY button action
-    watch.setTimeout(sum * 4); // Sleep after time/date scrolls off left edge
+    watch.setTimeout((sum + 8) * 4); // Sleep after time/date scrolls off left edge
 
     curX = 8; // Initialize position off right edge
     f    = 0;
