@@ -22,8 +22,8 @@ void setup() {
     for(i=0; i<img.pixels.length; i++) { // For each pixel...
       p = gamma[img.pixels[i] & 0xFF];   // Get 8-bit value
       if(i > 0) print(',');              // Print preceding comma
-      if(++c >= 16) {                    // Every 16 columns...
-        print("\n  ");                   //   Wrap output
+      if(++c >= 15) {                    // Every 15 columns of data...
+        print("\n  ");                   //   Wrap output (fits 80 cols)
         c = 0;                           //   And reset column counter
       }
       print("0x"); print(hex(p, 2));     // Output pixel as 2-digit hex #

@@ -121,6 +121,7 @@ static uint8_t
   napThreshold;           // If OCR2A >= this, OK for power-saving mode
 static uint16_t
   fps,                    // Estimated frames-per-second
+  holdTime,               // Frames per 1.5 sec
   bufSize,                // Size of display buffer, in bytes
   mV       = 0;           // Battery voltage, in millivolts
 static volatile uint8_t
@@ -131,8 +132,8 @@ static volatile uint8_t
   *ptr,                   // Current pointer into front buffer
   frontIdx = 0,           // Buffer # being displayed (vs modified)
   bSave,                  // Last button state
-  bAction  = ACTION_WAKE, // Last button action
-  sCount   = 0;
+  bAction  = ACTION_NONE, // Last button action
+  sCount   = 6;
 static volatile boolean
   wakeFlag = false,
   holdFlag = false,
@@ -206,8 +207,9 @@ void Watch::begin() {
   bSave = PIND & (_BV(PORTD3) | _BV(PORTD2)); // Get initial button state
 
   // Set up Timer2 for matrix interrupt
-  TCCR2A = _BV(WGM21); // Mode 2 (CTC), OC2A,2B off
-  fps    = setDisplayMode(planes, plex, dbuf); // Prescale (TCCR2B) set here
+  TCCR2A   = _BV(WGM21); // Mode 2 (CTC), OC2A,2B off
+  fps      = setDisplayMode(planes, plex, dbuf); // Prescale (TCCR2B) set here
+  holdTime = fps * 3 / 2;
 
   sei(); // Enable global interrupts
 }
@@ -276,8 +278,9 @@ uint16_t Watch::setDisplayMode(uint8_t nPlanes, uint8_t nLEDs,
     TCCR2B       = _BV(CS22) | _BV(CS21) | _BV(CS20);
     napThreshold = 1;
   }
-  fps    = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
-  cCount = fps >> 1; // Reset cursor blink counter
+  fps      = F_CPU / (9L * res * prescale); // Estimated frame refresh rate
+  holdTime = fps * 3 / 2;
+  cCount   = fps >> 1; // Reset cursor blink counter
 
   if(timeout < fps) timeout = fps; // Application can override this
 
@@ -428,7 +431,7 @@ static void sleep(void) {
   // (e.g first click won't advance digit in time-setting mode).
   wakeFlag = true;
   bAction  = ACTION_WAKE;
-  sCount   = 0; // Reset the "smoosh detect"
+  sCount   = 6; // Reset the "smoosh detect"
 
   // The front image buffer is cleared upon wake.  This avoids a frame
   // of old content from showing when the matrix interrupt is re-enabled
@@ -532,23 +535,30 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
           frontIdx ^= 1;                  // on return to first column
         ptr = img[frontIdx];  // Reset ptr to start of img
 
+        // Dirty hack: in certain cases the button-handling logic doesn't
+        // quite fit into the interrupt period.  Matrix is off during this
+        // time, so the ugly workaround isn't visible: Timer2 is briefly
+        // stopped while this part of the interrupt runs, resumes later.
+        uint8_t kludge = TIMSK2;
+        TIMSK2 = 0;
         // Watch for button 'hold' conditions
         if(bSave != (_BV(PORTD3) | _BV(PORTD2))) { // button(s) held
-
-          if(bCount >= (fps * 3 / 2)) { // ~1.5 second hold
+          if(bCount >= holdTime) { // ~1.5 second hold
             // If held for 9+ sec, assume watch has been "smooshed"
             // (e.g. in pocket), not intentionally pressed.
-            if(++sCount == 6) sleep();
+            if(!sCount) sleep();
+            sCount--;
             if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
             else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
-            else if(bSave == 0          ) bAction = ACTION_HOLD_BOTH;
+            else                          bAction = ACTION_HOLD_BOTH;
             holdFlag = (bAction >= ACTION_HOLD_LEFT);
-            bCount   = 0; // Reset debounce counter
-          } else bCount++;      // else keep counting...
+            bCount   = 0;  // Reset debounce counter
+          } else bCount++; // else keep counting...
         } else {
-          if(timeout > 0) timeout--; // Counter for sleep timeout
-          else            sleep();   // Timeout reached.  Nap time!
+          if(!timeout) sleep();
+          timeout--;
         }
+        TIMSK2 = kludge; // Resume Timer2
         if(--cCount == 0) cCount = fps >> 1; // Cursor blink counter
       } else OCR2A = (OCR2A << 1) | 1; // Last bitplane not yet reached
     } // else last pass not reached for this bitplane
@@ -601,8 +611,10 @@ ISR(INT0_vect) {
         }
       }
     }
-    bCount = sCount = 0;
-  } else if(b != bSave) bCount = sCount = 0; // Button press; clear counters
+    bCount = 0; sCount = 6;
+  } else if(b != bSave) {
+    bCount = 0; sCount = 6; // Button press; clear counters
+  }
   bSave = b; // Note last button state
 }
 

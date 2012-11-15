@@ -1,6 +1,15 @@
 // Battery 'fuel gauge' display.
+// Important thing to know here: this is based on the voltage when
+// the watch last awoke from sleep, NOT instantaneous voltage, as the
+// former is a better long-term estimate of how much capacity remains.
+// Instantaneous voltage is a poor indicator because running the watch
+// drags down the voltage, but this recovers with time.  So...the
+// battery display might show lots of 'fuel' remaining, but then shut
+// down after an extended bout of button-pressing.  This is
+// unfortunate but normal, and the watch should be available again
+// after the battery's had some time to rest.
 
-PROGMEM uint16_t mVtable[] = { 2882, 2885, 2889, 2896, 65535 };
+PROGMEM uint16_t mVtable[] = { 2884, 2886, 2890, 2900, 65535 };
 
 void mode_battery(uint8_t action) {
 

@@ -3,7 +3,7 @@
 // low BCD digits, displayed as 3- and 4-bit values, 1 pixel per bit.
 
 #define BACKGROUND 0
-#define BIT_CLEAR 24
+#define BIT_CLEAR 32
 #define BIT_SET  255
 
 void mode_binary(uint8_t action) {
@@ -18,7 +18,7 @@ void mode_binary(uint8_t action) {
       uint8_t plex = LED_PLEX_2;
       depth = 4;
       // Reduce depth/plex if battery voltage is low
-      if(watch.getmV() < 2880) {
+      if(watch.getmV() < BATT_LOW_MV) {
         depth = 2;
         plex  = LED_PLEX_1;
       }
