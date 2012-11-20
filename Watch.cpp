@@ -156,7 +156,8 @@ Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean doubleBuffer) {
 // jeelabs.org/2012/05/04/measuring-vcc-via-the-bandgap/
 static void readVoltage() {
 
-  int i;
+  int     i, prev;
+  uint8_t count;
 
   power_adc_enable();
   ADMUX  = _BV(REFS0) |                        // AVcc voltage reference
@@ -165,13 +166,17 @@ static void readVoltage() {
            _BV(ADPS2) | _BV(ADPS1); // 1/64 prescaler (8 MHz -> 125 KHz)
   // Datasheet notes that the first bandgap reading is usually garbage as
   // voltages are stabilizing.  It practice, it seems to take a bit longer
-  // than that (perhaps due to sleep).  Four readings are taken, and only
-  // the last one is kept.
-  for(i=0; i<4; i++) {
-    for(ADCSRA |= _BV(ADSC); ADCSRA & _BV(ADSC); );
+  // than that (perhaps due to sleep).  Tried various delays, but this was
+  // still inconsistent and kludgey.  Instead, repeated readings are taken
+  // until four concurrent readings stabilize within 10 mV.
+  for(prev=9999, count=0; count<4; ) {
+    for(ADCSRA |= _BV(ADSC); ADCSRA & _BV(ADSC); ); // Start, await ADC conv.
+    i  = ADC;                                       // Result
+    mV = i ? (1100L * 1023 / i) : 0;                // Scale to millivolts
+    if(abs((int)mV - prev) <= 10) count++;   // +1 stable reading
+    else                          count = 0; // too much change, start over
+    prev = mV;
   }
-  i      = ADC;
-  mV     = i ? (1100L * 1023 / i) : 0;
   ADCSRA = 0; // ADC off
   power_adc_disable();
 }
