@@ -63,7 +63,7 @@ void mode_moon(uint8_t action) {
     // If we just arrived here (whether through mode change
     // or wake from sleep), initialize the matrix driver:
     if(action >= ACTION_HOLD_LEFT) {
-      uint8_t depth = 7, plex = LED_PLEX_4;
+      uint8_t depth = 6, plex = LED_PLEX_4;
       // Reduce depth/plex if battery voltage is low
       if(watch.getmV() < BATT_LOW_MV) {
         depth = 2;
