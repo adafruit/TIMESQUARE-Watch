@@ -220,6 +220,9 @@ void mode_marquee(uint8_t action) {
 
     sum = 0;
     for(i=0; i<len; i++) sum += pgm_read_byte(&digitWidth[str[i]]);
+    // When in power-reduced mode, blitting happens quicker because
+    // of fewer screen bits; scale the timeout to compensate.
+    if(watch.getPlex() != LED_PLEX_4) sum *= 3;
 
     // Reset sleep timeout on ANY button action
     watch.setTimeout((sum + 8) * 4); // Sleep after time/date scrolls off left edge
