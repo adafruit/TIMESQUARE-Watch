@@ -144,12 +144,12 @@ static volatile uint16_t
   timeout  = 10;          // Countdown to sleep() (in frames)
 
 // Constructor
-Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean doubleBuffer) {
+Watch::Watch(uint8_t nPlanes, uint8_t nLEDs, boolean doubleBuffer) :
+Adafruit_GFX(8, 8) {
   img[0] = imgSpace;
   plex   = nLEDs;
   planes = nPlanes;
   dbuf   = doubleBuffer;
-  constructor(8, 8); // Init Adafruit_GFX (8x8 image)
 }
 
 // Battery monitoring idea adapted from JeeLabs article:
@@ -380,7 +380,6 @@ uint16_t Watch::getTimeout(void) {
 // interrupt may invoke it.
 static void sleep(void) {
 
-  int16_t i;
   uint8_t save;
 
   // Set all ports to high-impedance input mode, enable pullups
