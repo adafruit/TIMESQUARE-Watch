@@ -18,7 +18,7 @@ void setup() {
     img.filter(GRAY); // Convert image to grayscale
     img.loadPixels(); // Make pixels[] array readable
 
-    print("PROGMEM uint8_t img[] = {");
+    print("static const uint8_t PROGMEM img[] = {");
     for(i=0; i<img.pixels.length; i++) { // For each pixel...
       p = gamma[img.pixels[i] & 0xFF];   // Get 8-bit value
       if(i > 0) print(',');              // Print preceding comma

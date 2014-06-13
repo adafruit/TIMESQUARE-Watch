@@ -9,7 +9,7 @@
 // unfortunate but normal, and the watch should be available again
 // after the battery's had some time to rest.
 
-PROGMEM uint16_t mVtable[] = { 2884, 2886, 2890, 2900, 65535 };
+static const uint16_t PROGMEM mVtable[] = { 2884, 2886, 2890, 2900, 65535 };
 
 void mode_battery(uint8_t action) {
 
