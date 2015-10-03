@@ -546,7 +546,7 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
         uint8_t kludge = TIMSK2;
         TIMSK2 = 0;
         // Watch for button 'hold' conditions
-        if(bSave != (_BV(PORTD3) | _BV(PORTD2))) { // button(s) held
+        if(bSave != (_BV(PORTD3) | _BV(PORTD2))) { // At least one button held
           if(bCount >= holdTime) { // ~1.5 second hold
             // If held for 9+ sec, assume watch has been "smooshed"
             // (e.g. in pocket), not intentionally pressed.
@@ -555,7 +555,7 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK) {
             if     (bSave == _BV(PORTD3)) bAction = ACTION_HOLD_LEFT;
             else if(bSave == _BV(PORTD2)) bAction = ACTION_HOLD_RIGHT;
             else                          bAction = ACTION_HOLD_BOTH;
-            holdFlag = (bAction >= ACTION_HOLD_LEFT);
+            holdFlag = true;  // Don't generate ACTION_TAP_* events on release
             bCount   = 0;  // Reset debounce counter
           } else bCount++; // else keep counting...
         } else {
@@ -596,26 +596,19 @@ ISR(INT0_vect) {
   // Mode-specific code can override this based on action.
   if(timeout < fps) timeout = fps;
 
-  if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Buttons released
-    if((bCount > 3)) {                   // Past debounce threshold?
-      if(wakeFlag == true) {
-        // First click (release) on wake does NOT perform corresponding
-        // action (e.g. don't advance digit in time-setting mode).
-        bAction  = ACTION_NONE;
-        wakeFlag = false;
-      } else {
-        // If we arrived here by a mode switch (extended hold),
-        // the button release should NOT register as a tap.
-        if(holdFlag) {
-          bAction  = ACTION_NONE;
-          holdFlag = false;
-        } else {
-          if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;
-          else if(bSave == _BV(PORTD2)) bAction = ACTION_TAP_RIGHT;
-        }
-      }
+  if(b == (_BV(PORTD3) | _BV(PORTD2))) { // Both buttons released
+    // Record ACTION_TAP events if the buttons were held down for the
+    // minimum debounce time, but this was not the wakeup tap, and
+    // a long-press (ACTION_HOLD) was not already recorded.
+    if(bCount > 3 && !wakeFlag && !holdFlag) {
+      if     (bSave == _BV(PORTD3)) bAction = ACTION_TAP_LEFT;
+      else if(bSave == _BV(PORTD2)) bAction = ACTION_TAP_RIGHT;
     }
+
+    // In any case, reset counters and flags when buttons are released.
     bCount = 0; sCount = 6;
+    wakeFlag = false;
+    holdFlag = false;
   } else if(b != bSave) {
     bCount = 0; sCount = 6; // Button press; clear counters
   }
