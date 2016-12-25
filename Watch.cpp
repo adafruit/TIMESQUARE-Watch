@@ -14,7 +14,12 @@
 #include <avr/pgmspace.h>
 #include <avr/power.h>
 #include <avr/sleep.h>
+#include "Adafruit_GFX.h"
 #include "Watch.h"
+
+
+#define watch_swap_int16_t(a, b) { int16_t t = a; a = b; b = t; }
+
 
 // This code looks ridiculous and requires quite a bit of explanation...
 
@@ -320,7 +325,7 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
 
   switch(rotation) {
    case 1:
-    swap(x, y);
+    watch_swap_int16_t(x, y);
     x = WIDTH  - 1 - x;
     break;
    case 2:
@@ -328,7 +333,7 @@ void Watch::drawPixel(int16_t x, int16_t y, uint16_t c) {
     y = HEIGHT - 1 - y;
     break;
    case 3:
-    swap(x, y);
+    watch_swap_int16_t(x, y);
     y = HEIGHT - 1 - y;
     break;
   }
